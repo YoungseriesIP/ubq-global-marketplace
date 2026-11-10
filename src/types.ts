@@ -17,6 +17,8 @@ export interface Listing {
   sellerName?: string
   /** Demo listings have placeholder sellers and cannot be bought. */
   isDemo?: boolean
+  /** Facts about the seller that the server can check. */
+  sellerTrust?: { emailVerified: boolean; verifiedSales: number; complaints: number; trusted: boolean }
 }
 
 export type Category =

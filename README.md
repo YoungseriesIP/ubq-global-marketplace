@@ -47,6 +47,8 @@ Set these in `.env`. Never commit it.
 - `VITE_ESCROW_ADDRESS`: deployed escrow contract address to enable escrow payments (optional, public).
 - `VITE_DEFAULT_CHAIN_ID`: chain used for payments, defaults to Arc Testnet (optional).
 - `DATABASE_URL`: Postgres connection string (Neon). Required. Keep it secret and server-side only.
+- `APP_ENCRYPTION_KEY`: 64 hex characters. Encrypts staff authenticator secrets. Required for the staff console. Keep it secret and server-side only.
+- `ADMIN_BOOTSTRAP_ADDRESSES`: comma-separated wallet addresses of the first admins (server-side only). They still need the authenticator code.
 - `VITE_ADMIN_ADDRESSES`: comma-separated wallet addresses that see the admin button. Empty by default (optional, public).
 - `PORT`: API port, defaults to 3001 (optional).
 - `RPC_PROXY_BASE_URL`, `RPC_PROXY_TOKEN`, `RPC_PROXY_CHAINS`: provisioned by Arc Studio (optional outside Arc Studio).
@@ -60,3 +62,13 @@ Circle Console setup for email and Google sign-in: configure email (SMTP) and th
 - Secrets (tokens, keys, signatures) are removed from the in-app request traces.
 - Image links do not send a referrer. Country is guessed from browser language settings, so no visitor address is sent to a third party.
 - The services directory (reviews, bookings, messages, ID checks, admin panel) is still stored in each visitor's own browser and is a demo, not a protected system.
+
+## Trust and security features
+
+- Sign-in sessions can be viewed and revoked; new-device sign-ins raise an alert; repeated failed sign-ins lock an account briefly.
+- Every purchase is checked before payment (limits, restrictions, risk score) and verified on the network afterwards. A payment is never marked paid on the buyer's word.
+- Staff console with roles (support, compliance, finance, admin), authenticator codes, cases, appeals, incident log, payment re-checks and a tamper-evident audit log. Sensitive changes need a second admin once two exist.
+- Listings with prohibited wording, or reported by three people, are held for human review. Account restrictions from automatic checks last one day and can be appealed.
+- Data export and deletion requests; identity documents are never stored.
+
+Not included yet: identity (KYC) and business (KYB) verification, sanctions and wallet screening, real-inbox email alerts. These need provider accounts and legal review. Run the checks with `bun run test:unit` and `bun run test:security` (the second uses the real database with throwaway data).

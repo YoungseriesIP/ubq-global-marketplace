@@ -17,6 +17,22 @@ interface ShopPageProps {
 
 const inputStyle = { background: 'var(--surface-muted)', color: 'var(--ink)', border: '1.5px solid var(--border)' }
 
+const STATUS_LABEL: Record<ApiOrder['status'], { text: string; bg: string; fg: string }> = {
+  verified: { text: 'Confirmed on the network', bg: 'rgba(26,128,71,0.12)', fg: 'var(--success)' },
+  unverified: { text: 'Awaiting confirmation', bg: 'rgba(245,158,11,0.14)', fg: '#92400e' },
+  pending_payment: { text: 'Not paid yet', bg: 'var(--surface-muted)', fg: 'var(--muted)' },
+  failed: { text: 'Payment did not match', bg: 'rgba(186,43,76,0.1)', fg: 'var(--danger)' },
+}
+
+function StatusPill({ status }: { status: ApiOrder['status'] }) {
+  const m = STATUS_LABEL[status]
+  return (
+    <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold" style={{ background: m.bg, color: m.fg }}>
+      {m.text}
+    </span>
+  )
+}
+
 export function ShopPage({ listings, onSell, onRemove }: ShopPageProps) {
   const { user, loading, openSignIn, updateProfile, config } = useAuth()
   const { localText } = useCurrency()
@@ -25,6 +41,16 @@ export function ShopPage({ listings, onSell, onRemove }: ShopPageProps) {
   const [shopName, setShopName] = useState('')
   const [shopBio, setShopBio] = useState('')
   const [saving, setSaving] = useState(false)
+
+  async function recheck(orderId: string) {
+    try {
+      await api(`/payments/${orderId}/recheck`, { method: 'POST', body: {} })
+      const r = await api<{ orders: ApiOrder[] }>('/orders/mine')
+      setOrders(r.orders)
+    } catch {
+      /* the status stays as it was */
+    }
+  }
 
   useEffect(() => {
     if (!user) return
@@ -209,8 +235,14 @@ export function ShopPage({ listings, onSell, onRemove }: ShopPageProps) {
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold truncate" style={{ color: 'var(--ink)' }}>{o.title}</p>
-                    <p className="text-xs" style={{ color: 'var(--subtle)' }}>
-                      {sold ? 'Sold' : 'Bought'} · {new Date(o.createdAt).toLocaleDateString()}
+                    <p className="text-xs flex flex-wrap items-center gap-x-2 gap-y-1" style={{ color: 'var(--subtle)' }}>
+                      <span>{sold ? 'Sold' : 'Bought'} · {new Date(o.createdAt).toLocaleDateString()}</span>
+                      <StatusPill status={o.status} />
+                      {(o.status === 'unverified' && o.txHash) && (
+                        <button onClick={() => void recheck(o.id)} className="font-semibold underline" style={{ color: 'var(--accent-hover)' }}>
+                          Check again
+                        </button>
+                      )}
                     </p>
                   </div>
                   <div className="text-right shrink-0">

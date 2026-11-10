@@ -16,7 +16,9 @@
     "build": "vite build",
     "server": "bun --watch run server/index.ts",
     "start": "NODE_ENV=production bun run server/index.ts",
-    "build:api": "bun build server/vercel-entry.ts --target=node --format=esm --outfile=api/index.js"
+    "build:api": "bun build server/vercel-entry.ts --target=node --format=esm --outfile=api/index.js",
+    "test:unit": "bun test server/sec",
+    "test:security": "bun run tests/security-live.ts"
   },
   "dependencies": {
     "@circle-fin/adapter-viem-v2": "^1.18.0",

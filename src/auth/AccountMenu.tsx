@@ -1,21 +1,34 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, Copy, LogOut, Store, Wallet } from 'lucide-react'
+import { ChevronDown, Copy, LogOut, ShieldCheck, ShieldAlert, Store, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from './AuthContext'
 import { useUsdcBalance } from './payments'
 import { useCurrency } from '@/lib/currency'
+import { api } from '@/lib/api'
 
 interface AccountMenuProps {
   chainId: number
   onOpenShop: () => void
+  onOpenSecurity: () => void
+  onOpenStaff: () => void
 }
 
-export function AccountMenu({ chainId, onOpenShop }: AccountMenuProps) {
+export function AccountMenu({ chainId, onOpenShop, onOpenSecurity, onOpenStaff }: AccountMenuProps) {
   const { user, signOut, needsReauth, openSignIn } = useAuth()
   const { balance } = useUsdcBalance(chainId)
   const { localText } = useCurrency()
   const [open, setOpen] = useState(false)
+  const [isStaff, setIsStaff] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!user) return
+    let live = true
+    api<{ roles: string[] }>('/staff/me')
+      .then((m) => { if (live) setIsStaff(m.roles.length > 0) })
+      .catch(() => { if (live) setIsStaff(false) })
+    return () => { live = false }
+  }, [user])
 
   useEffect(() => {
     if (!open) return
@@ -103,6 +116,24 @@ export function AccountMenu({ chainId, onOpenShop }: AccountMenuProps) {
           >
             <Store size={15} /> My shop
           </button>
+          <button
+            role="menuitem"
+            onClick={() => { setOpen(false); onOpenSecurity() }}
+            className="w-full flex items-center gap-2.5 px-4 py-3 text-sm font-semibold text-left transition-opacity hover:opacity-80"
+            style={{ color: 'var(--ink)' }}
+          >
+            <ShieldCheck size={15} /> Security
+          </button>
+          {isStaff && (
+            <button
+              role="menuitem"
+              onClick={() => { setOpen(false); onOpenStaff() }}
+              className="w-full flex items-center gap-2.5 px-4 py-3 text-sm font-semibold text-left transition-opacity hover:opacity-80"
+              style={{ color: 'var(--ink)' }}
+            >
+              <ShieldAlert size={15} /> Staff console
+            </button>
+          )}
           <button
             role="menuitem"
             onClick={() => { setOpen(false); void signOut() }}

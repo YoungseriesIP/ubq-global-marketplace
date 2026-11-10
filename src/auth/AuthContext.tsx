@@ -7,7 +7,7 @@ import type { ReactNode } from 'react'
 import { useAccount, useSignMessage } from 'wagmi'
 import type { W3SSdk } from '@circle-fin/w3s-pw-web-sdk'
 import type { SocialLoginProvider } from '@circle-fin/w3s-pw-web-sdk/dist/src/types'
-import { api, ApiError, getSessionToken, setSessionToken } from '@/lib/api'
+import { api, ApiError, getDeviceId, getSessionToken, setSessionToken } from '@/lib/api'
 import type { AppUser, ServerConfig } from '@/lib/api'
 
 export type FlowStep = 'idle' | 'sending-code' | 'enter-code' | 'verifying' | 'creating-wallet' | 'error'
@@ -152,7 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setFlow({ step: 'creating-wallet', message: 'Setting up your wallet…' })
 
       type SessionRes = { token?: string; needsWallet?: boolean }
-      let s = await api<SessionRes>('/wallet/session', { body: { userToken: c.userToken }, auth: false })
+      let s = await api<SessionRes>('/wallet/session', { body: { userToken: c.userToken, deviceId: getDeviceId() }, auth: false })
 
       if (s.needsWallet) {
         const init = await api<{ challengeId?: string; alreadyInitialized?: boolean }>('/wallet/initialize', {
@@ -161,7 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (init.challengeId) await executeChallenge(init.challengeId)
         for (let i = 0; i < 20 && !s.token; i += 1) {
           await sleep(2000)
-          s = await api<SessionRes>('/wallet/session', { body: { userToken: c.userToken }, auth: false })
+          s = await api<SessionRes>('/wallet/session', { body: { userToken: c.userToken, deviceId: getDeviceId() }, auth: false })
         }
       }
       if (!s.token) throw new Error('Your wallet is still being created. Please try again in a moment.')
@@ -246,7 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setFlow({ step: 'verifying', message: 'Approve the signature request in your wallet.' })
       const { message } = await api<{ message: string }>('/auth/nonce', { body: { address: wagmiAddress }, auth: false })
       const signature = await signMessageAsync({ message })
-      const r = await api<{ token: string }>('/auth/verify', { body: { address: wagmiAddress, signature }, auth: false })
+      const r = await api<{ token: string }>('/auth/verify', { body: { address: wagmiAddress, signature, deviceId: getDeviceId() }, auth: false })
       setSessionToken(r.token)
       const me = await api<{ user: AppUser }>('/me')
       setUser(me.user)

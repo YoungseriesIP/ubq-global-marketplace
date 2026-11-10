@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { X, ExternalLink, CheckCircle, AlertCircle, Loader } from 'lucide-react'
+import { X, ExternalLink, CheckCircle, AlertCircle, Loader, ShieldCheck, Flag } from 'lucide-react'
 import { TokenUSDC } from '@web3icons/react'
 import { buildTxExplorerUrl } from '@/onchain-facts'
 import { useAuth } from '@/auth/AuthContext'
 import { NeedsSignInError, useUsdcBalance, useWalletActions } from '@/auth/payments'
 import { useCurrency } from '@/lib/currency'
-import { api } from '@/lib/api'
+import { api, ApiError } from '@/lib/api'
 import type { Listing } from '../types'
 
 interface BuyModalProps {
@@ -24,13 +24,20 @@ function friendlyError(error: unknown): string {
 }
 
 export function BuyModal({ listing, onClose }: BuyModalProps) {
-  const { user, openSignIn, needsReauth } = useAuth()
+  const { user, openSignIn, needsReauth, signOut } = useAuth()
   const { payUsdc, isCircle } = useWalletActions(listing.chainId)
   const { balance, refresh } = useUsdcBalance(listing.chainId)
-  const { localText, rateText, currency } = useCurrency()
+  const { localText, rateText } = useCurrency()
 
   const [confirmed, setConfirmed] = useState(false)
-  const [status, setStatus] = useState<'idle' | 'paying' | 'success' | 'error'>('idle')
+  const [status, setStatus] = useState<'idle' | 'paying' | 'success' | 'pending' | 'error'>('idle')
+  const [orderId, setOrderId] = useState<string | null>(null)
+  const [note, setNote] = useState<string | null>(null)
+  const [stepUp, setStepUp] = useState(false)
+  const [checking, setChecking] = useState(false)
+  const [reporting, setReporting] = useState(false)
+  const [reportKind, setReportKind] = useState('counterfeit')
+  const [reported, setReported] = useState(false)
   const [hash, setHash] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -41,27 +48,58 @@ export function BuyModal({ listing, onClose }: BuyModalProps) {
   const processing = status === 'paying'
   const explorerUrl = hash ? buildTxExplorerUrl(listing.chainId, hash) : null
 
+  function applyResult(r: { status: string; note: string }) {
+    setNote(r.note)
+    if (r.status === 'verified') setStatus('success')
+    else if (r.status === 'failed') {
+      setError(r.note)
+      setStatus('error')
+    } else setStatus('pending')
+  }
+
   async function handleBuy() {
     if (!user) return
     setStatus('paying')
     setError(null)
+    setStepUp(false)
     try {
-      const txHash = await payUsdc(listing.sellerAddress as `0x${string}`, priceUsdc)
+      // 1. The server checks the purchase first (limits, restrictions, risk) and opens an order.
+      const intent = await api<{ orderId: string; payTo: string; amountUsdc: string }>('/payments/precheck', {
+        body: { listingId: listing.id },
+      })
+      setOrderId(intent.orderId)
+      // 2. The buyer pays the seller directly.
+      const txHash = await payUsdc(intent.payTo as `0x${string}`, intent.amountUsdc)
       setHash(txHash)
-      setStatus('success')
       refresh()
-      // Record the sale for the seller's shop. The payment itself already settled onchain.
-      void api('/orders', {
-        body: {
-          listingId: listing.id,
-          txHash,
-          displayCurrency: local ? currency : undefined,
-          displayAmount: undefined,
-        },
-      }).catch(() => { /* order history is best-effort */ })
+      // 3. The server confirms the payment on the network before anything is marked paid.
+      applyResult(await api<{ status: string; note: string }>(`/payments/${intent.orderId}/confirm`, { body: { txHash } }))
     } catch (e) {
-      setError(friendlyError(e))
+      if (e instanceof ApiError && e.status === 409) setStepUp(true)
+      setError(e instanceof ApiError ? e.message : friendlyError(e))
       setStatus('error')
+    }
+  }
+
+  async function recheck() {
+    if (!orderId) return
+    setChecking(true)
+    try {
+      applyResult(await api<{ status: string; note: string }>(`/payments/${orderId}/recheck`, { method: 'POST', body: {} }))
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not check right now.')
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  async function submitReport() {
+    try {
+      await api(`/listings/${listing.id}/report`, { body: { kind: reportKind } })
+      setReported(true)
+      setReporting(false)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not send the report.')
     }
   }
 
@@ -79,7 +117,7 @@ export function BuyModal({ listing, onClose }: BuyModalProps) {
       >
         <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
           <h2 className="display font-bold text-lg" style={{ color: 'var(--ink)' }}>
-            {status === 'success' ? 'Purchase complete' : 'Confirm purchase'}
+            {status === 'success' ? 'Purchase complete' : status === 'pending' ? 'Payment sent' : 'Confirm purchase'}
           </h2>
           {!processing && (
             <button
@@ -94,15 +132,37 @@ export function BuyModal({ listing, onClose }: BuyModalProps) {
         </div>
 
         <div className="p-6 space-y-5">
-          {status === 'success' ? (
+          {status === 'pending' ? (
+            <div className="flex flex-col items-center gap-4 py-4">
+              <div className="w-16 h-16 rounded-full flex items-center justify-center" style={{ background: 'rgba(245,158,11,0.12)' }}>
+                <Loader size={30} className={checking ? 'animate-spin' : ''} style={{ color: '#b45309' }} />
+              </div>
+              <div className="text-center">
+                <p className="font-bold text-base" style={{ color: 'var(--ink)' }}>Waiting for the network</p>
+                <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
+                  {note ?? 'Your payment was sent.'} It is only marked paid once we can confirm it, which is usually a few seconds.
+                </p>
+              </div>
+              {explorerUrl && (
+                <a href={explorerUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-sm font-semibold hover:opacity-70" style={{ color: 'var(--accent-hover)' }}>
+                  View transaction <ExternalLink size={13} />
+                </a>
+              )}
+              {error && <p className="text-sm" style={{ color: 'var(--danger)' }}>{error}</p>}
+              <button onClick={() => void recheck()} disabled={checking} className="w-full min-h-[44px] py-3 rounded-xl text-sm font-bold active:scale-[0.98] disabled:opacity-60" style={{ background: 'var(--accent)', color: '#ffffff' }}>
+                {checking ? 'Checking…' : 'Check again'}
+              </button>
+              <button onClick={onClose} className="text-sm font-semibold" style={{ color: 'var(--muted)' }}>Close, I will check later in My Shop</button>
+            </div>
+          ) : status === 'success' ? (
             <div className="flex flex-col items-center gap-4 py-4">
               <div className="w-16 h-16 rounded-full flex items-center justify-center" style={{ background: 'rgba(26,128,71,0.12)' }}>
                 <CheckCircle size={32} style={{ color: 'var(--success)' }} />
               </div>
               <div className="text-center">
-                <p className="font-bold text-base" style={{ color: 'var(--ink)' }}>Payment sent</p>
+                <p className="font-bold text-base" style={{ color: 'var(--ink)' }}>Payment confirmed</p>
                 <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
-                  {listing.sellerName ?? 'The seller'} has been paid {priceUsdc} USDC.
+                  {listing.sellerName ?? 'The seller'} has been paid {priceUsdc} USDC. We verified it on the network.
                 </p>
               </div>
               {explorerUrl && (
@@ -134,6 +194,23 @@ export function BuyModal({ listing, onClose }: BuyModalProps) {
                 <p className="text-xs" style={{ color: 'var(--muted)' }}>
                   from {listing.sellerName ?? 'a seller'} in {listing.location}
                 </p>
+                {listing.sellerTrust && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {listing.sellerTrust.emailVerified && (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(26,128,71,0.12)', color: 'var(--success)' }}>
+                        <ShieldCheck size={11} /> Email verified
+                      </span>
+                    )}
+                    {listing.sellerTrust.trusted && (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(26,128,71,0.12)', color: 'var(--success)' }}>
+                        <CheckCircle size={11} /> Trusted seller
+                      </span>
+                    )}
+                    <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: 'var(--surface)', color: 'var(--muted)' }}>
+                      {listing.sellerTrust.verifiedSales} verified {listing.sellerTrust.verifiedSales === 1 ? 'sale' : 'sales'}
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -182,6 +259,15 @@ export function BuyModal({ listing, onClose }: BuyModalProps) {
               )}
 
               {error && <p className="text-sm" style={{ color: 'var(--danger)' }}>{error}</p>}
+              {stepUp && (
+                <button
+                  onClick={() => { void signOut().then(() => { onClose(); openSignIn() }) }}
+                  className="w-full min-h-[44px] py-3 rounded-xl text-sm font-bold active:scale-[0.98]"
+                  style={{ background: 'var(--surface-muted)', color: 'var(--ink)' }}
+                >
+                  Sign in again to continue
+                </button>
+              )}
 
               {!user ? (
                 <button
@@ -232,6 +318,29 @@ export function BuyModal({ listing, onClose }: BuyModalProps) {
                     </button>
                   </>
                 )
+              )}
+
+              {user && !listing.isDemo && !isOwnListing && (
+                <div className="pt-1">
+                  {reported ? (
+                    <p className="text-xs" style={{ color: 'var(--success)' }}>Thanks. We will review this listing.</p>
+                  ) : reporting ? (
+                    <div className="flex items-center gap-2">
+                      <select value={reportKind} onChange={(e) => setReportKind(e.target.value)} className="flex-1 min-h-[40px] rounded-lg px-2 text-sm" style={{ background: 'var(--surface-muted)', color: 'var(--ink)' }}>
+                        <option value="counterfeit">Counterfeit or fake</option>
+                        <option value="not_as_described">Not as described</option>
+                        <option value="scam">Looks like a scam</option>
+                        <option value="prohibited">Prohibited item</option>
+                        <option value="other">Something else</option>
+                      </select>
+                      <button onClick={() => void submitReport()} className="min-h-[40px] px-3 rounded-lg text-sm font-bold" style={{ background: 'var(--accent)', color: '#fff' }}>Send</button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setReporting(true)} className="inline-flex items-center gap-1.5 text-xs font-semibold" style={{ color: 'var(--muted)' }}>
+                      <Flag size={12} /> Report this listing
+                    </button>
+                  )}
+                </div>
               )}
             </>
           )}

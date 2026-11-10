@@ -17,6 +17,8 @@ import { useBookings } from './services/useBookings'
 import { useMessages } from './services/useMessages'
 import { useCountryFilter } from './services/useCountryFilter'
 import { useAuth } from './auth/AuthContext'
+import { SecurityPage } from './security/SecurityPage'
+import { StaffConsole } from './security/StaffConsole'
 import { CurrencyProvider } from './lib/currency'
 import { api, toListing } from './lib/api'
 import type { ApiListing } from './lib/api'
@@ -44,6 +46,16 @@ export default function App() {
   const isAdmin = !!address && ADMIN_WALLETS.includes(address.toLowerCase())
 
   const [view, setView]           = useState<AppView>('marketplace')
+
+  // Record the consent given in the sign-in window once the session exists.
+  useEffect(() => {
+    if (!user || localStorage.getItem('tp_consent_pending') !== '1') return
+    localStorage.removeItem('tp_consent_pending')
+    void Promise.all([
+      api('/security/consent', { body: { kind: 'terms', version: '1' } }),
+      api('/security/consent', { body: { kind: 'privacy', version: '1' } }),
+    ]).catch(() => { /* retried at the next sign-in */ })
+  }, [user])
   const [showAdmin, setShowAdmin] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
   const [buyTarget, setBuyTarget] = useState<Listing | null>(null)
@@ -135,6 +147,8 @@ export default function App() {
       <CountryFilterBanner filter={countryFilter} />
 
       <main className="max-w-6xl mx-auto pb-20">
+        {view === 'security' && <SecurityPage onBack={() => setView('marketplace')} />}
+        {view === 'staff' && <StaffConsole onBack={() => setView('marketplace')} />}
         {view === 'services' && (
           <ServicesDirectory
             store={providersStore}

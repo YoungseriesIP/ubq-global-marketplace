@@ -192,6 +192,11 @@ export interface OrderRow {
   display_amount: string | null
   tx_hash: string | null
   created_at: number
+  status: 'pending_payment' | 'unverified' | 'verified' | 'failed'
+  verified_at: number | null
+  verify_note: string | null
+  risk_score: number | null
+  expires_at: number | null
 }
 
 // ── Demo seed (only when the listings table is empty) ────────────────────

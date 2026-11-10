@@ -3,7 +3,7 @@ import { useAuth } from '@/auth/AuthContext'
 import { AccountMenu } from '@/auth/AccountMenu'
 import { CURRENCY_OPTIONS, useCurrency } from '@/lib/currency'
 
-export type AppView = 'marketplace' | 'my-listings' | 'services'
+export type AppView = 'marketplace' | 'my-listings' | 'services' | 'security' | 'staff'
 
 function CurrencyPicker() {
   const { currency, isManual, setCurrency } = useCurrency()
@@ -123,7 +123,7 @@ export function Navbar({ onSell, view, setView, isAdmin, onAdmin }: NavbarProps)
           )}
           <CurrencyPicker />
           {user ? (
-            <AccountMenu chainId={config?.chainId ?? 5042002} onOpenShop={() => setView('my-listings')} />
+            <AccountMenu chainId={config?.chainId ?? 5042002} onOpenShop={() => setView('my-listings')} onOpenSecurity={() => setView('security')} onOpenStaff={() => setView('staff')} />
           ) : (
             <button
               onClick={openSignIn}

@@ -22,6 +22,17 @@ export function SignInModal() {
   } = useAuth()
   const { isConnected } = useAccount()
   const [email, setEmail] = useState(user?.email ?? '')
+  const [agreed, setAgreed] = useState(() => localStorage.getItem('tp_agreed_v1') === '1')
+
+  function agree(v: boolean) {
+    setAgreed(v)
+    if (v) {
+      localStorage.setItem('tp_agreed_v1', '1')
+      localStorage.setItem('tp_consent_pending', '1') // recorded on the server right after sign-in
+    } else {
+      localStorage.removeItem('tp_agreed_v1')
+    }
+  }
 
   if (!signInOpen) return null
 
@@ -91,9 +102,24 @@ export function SignInModal() {
                 />
               </div>
 
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={agreed}
+                  onChange={(e) => agree(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded"
+                  style={{ accentColor: 'var(--accent)' }}
+                />
+                <span className="text-xs leading-relaxed" style={{ color: 'var(--muted)' }}>
+                  I agree to the marketplace rules: no illegal items, fake documents or scams. I understand my sign-in activity
+                  (device and time, not my identity documents) is recorded to keep accounts safe, and I can export or ask to delete my data
+                  from the Security page.
+                </span>
+              </label>
+
               <button
                 onClick={() => void sendEmailCode(email.trim())}
-                disabled={!validEmail || !walletReady}
+                disabled={!validEmail || !walletReady || !agreed}
                 className="w-full min-h-[44px] py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50"
                 style={{ background: 'var(--accent)', color: '#ffffff' }}
               >
@@ -102,7 +128,7 @@ export function SignInModal() {
 
               <button
                 onClick={() => void signInWithGoogle()}
-                disabled={!walletReady || !config?.googleClientId}
+                disabled={!walletReady || !config?.googleClientId || !agreed}
                 className="w-full min-h-[44px] py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 border transition-all active:scale-[0.98] disabled:opacity-50"
                 style={{ background: 'var(--surface)', color: 'var(--ink)', borderColor: 'var(--border)' }}
               >
@@ -135,7 +161,8 @@ export function SignInModal() {
               {isConnected ? (
                 <button
                   onClick={() => void signInWithWallet()}
-                  className="w-full min-h-[44px] py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 border transition-all active:scale-[0.98]"
+                  disabled={!agreed}
+                  className="w-full min-h-[44px] py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 border transition-all active:scale-[0.98] disabled:opacity-50"
                   style={{ background: 'var(--surface)', color: 'var(--ink)', borderColor: 'var(--border)' }}
                 >
                   <Wallet size={15} /> Sign a message to continue (free)

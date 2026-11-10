@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { X, Upload, ChevronDown } from 'lucide-react'
 import { useAuth } from '@/auth/AuthContext'
 import { COUNTRY_LIST } from '@/services/useCountryFilter'
+import { toast } from 'sonner'
 import { api, toListing } from '@/lib/api'
 import type { ApiListing } from '@/lib/api'
 import type { Listing, Category } from '../types'
@@ -49,7 +50,7 @@ export function CreateListingModal({ onClose, onCreated }: CreateListingModalPro
 
     setSaving(true)
     try {
-      const res = await api<{ listing: ApiListing }>('/listings', {
+      const res = await api<{ listing: ApiListing; held?: boolean }>('/listings', {
         body: {
           title: title.trim(),
           description: description.trim(),
@@ -60,7 +61,13 @@ export function CreateListingModal({ onClose, onCreated }: CreateListingModalPro
           imageUrl: imageUrl.trim() || undefined,
         },
       })
-      onCreated(toListing(res.listing))
+      if (res.held) {
+        toast.message('Your listing is waiting for a quick review', {
+          description: 'Some wording needs a human check before it goes public. We will publish it if it is fine.',
+        })
+      } else {
+        onCreated(toListing(res.listing))
+      }
       onClose()
     } catch (err) {
       setError((err as Error).message)

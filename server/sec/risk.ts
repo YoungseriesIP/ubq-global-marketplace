@@ -30,7 +30,7 @@ export interface RiskConfig {
 }
 
 export const DEFAULT_CONFIG: RiskConfig = {
-  thresholds: { stepUp: 40, blocked: 60, review: 80 },
+  thresholds: { stepUp: 40, blocked: 70, review: 90 },
   weights: {
     newAccount: 15, unverifiedWallet: 10, newDevice: 15, highAmount: 25, orderVelocity: 20,
     failedAuth: 20, recentRestriction: 25, sharedDevice: 20, listingBurst: 20, prohibitedTerm: 40,
@@ -227,7 +227,12 @@ export async function evaluate(input: EvalInput): Promise<EvalResult> {
   const [u, fails, restr, orders1h, orders24h, listings1h, shared, seller] = await Promise.all([
     one<{ created_at: number }>('SELECT created_at FROM users WHERE address = $1', [input.address]),
     one<{ n: number }>("SELECT COUNT(*)::int AS n FROM security_events WHERE address = $1 AND kind = 'login_failed' AND at > $2", [input.address, day]),
-    one<{ n: number }>('SELECT COUNT(*)::int AS n FROM restrictions WHERE address = $1', [input.address]),
+    // Restrictions that were overturned on appeal do not count against the account.
+    one<{ n: number }>(
+      `SELECT COUNT(*)::int AS n FROM restrictions r WHERE r.address = $1 AND r.created_at > $2
+       AND NOT EXISTS (SELECT 1 FROM appeals a WHERE a.restriction_id = r.id AND a.status = 'accepted')`,
+      [input.address, now - 90 * 86_400_000],
+    ),
     one<{ n: number }>("SELECT COUNT(*)::int AS n FROM orders WHERE buyer = $1 AND created_at > $2 AND status <> 'failed'", [input.address, hour]),
     one<{ total: string | null }>("SELECT SUM(amount_usdc::numeric)::text AS total FROM orders WHERE buyer = $1 AND created_at > $2 AND status IN ('verified','unverified','pending_payment')", [input.address, day]),
     one<{ n: number }>('SELECT COUNT(*)::int AS n FROM listings WHERE seller = $1 AND created_at > $2', [input.address, hour]),
@@ -274,14 +279,13 @@ export async function evaluate(input: EvalInput): Promise<EvalResult> {
     [now, input.address, input.action, score, decision, JSON.stringify(reasons)],
   )
 
-  if (decision === 'review') {
-    // Highest tier: open a case and apply a short, automatic, reversible restriction. Never a permanent ban.
-    const scope: Scope = input.action === 'listing' ? 'sell' : 'buy'
+  if (decision === 'review' && input.action === 'order') {
+    // Highest tier for a payment: open a case and apply a short, automatic, reversible hold. Never a permanent ban.
     result.caseId = await openCase({
       kind: 'risk_review', severity: 'high', subject: input.address,
-      title: `Automatic review: ${input.action} scored ${score}`, summary: reasons.join('; '), by: 'system',
+      title: `Automatic review: payment scored ${score}`, summary: reasons.join('; '), by: 'system',
     })
-    await createRestriction({ address: input.address, scope, reason: `Held for review (case ${result.caseId}). You can appeal.`, by: 'system', days: 1, caseId: result.caseId, auto: true })
+    await createRestriction({ address: input.address, scope: 'buy', reason: `Held for review (case ${result.caseId}). You can appeal.`, by: 'system', days: 1, caseId: result.caseId, auto: true })
     await recordEvent({ address: input.address, kind: 'risk_review', severity: 'high', details: { score, caseId: result.caseId } })
   }
   return result
@@ -293,4 +297,36 @@ export async function pruneRetention(): Promise<void> {
   const day = 86_400_000
   await exec('DELETE FROM security_events WHERE at < $1', [Date.now() - cfg.retentionDays.securityEvents * day])
   await exec('DELETE FROM risk_assessments WHERE at < $1', [Date.now() - cfg.retentionDays.riskAssessments * day])
+}
+
+// ── Verification level ───────────────────────────────────────────────────
+/**
+ * 0 = wallet only (nothing verified), 1 = email verified by the sign-in provider.
+ * Levels 2-4 are only ever set from a verified provider record in `verifications`; nothing here invents them.
+ */
+export async function levelFor(address: string, method: string): Promise<number> {
+  const base = method === 'circle' ? 1 : 0
+  const v = await one<{ level: number }>(
+    "SELECT level FROM verifications WHERE address = $1 AND status = 'verified'",
+    [address],
+  )
+  return Math.max(base, v?.level ?? 0)
+}
+
+/**
+ * True when this device is new to an account that has used other devices before.
+ * A person's very first device is not suspicious.
+ */
+export async function isFreshDevice(address: string, deviceHash: string | null): Promise<boolean> {
+  if (!deviceHash) return false
+  const row = await one<{ first_seen: number }>(
+    'SELECT first_seen FROM user_devices WHERE address = $1 AND device_hash = $2',
+    [address, deviceHash],
+  )
+  if (!row || Date.now() - Number(row.first_seen) > 10 * 60_000) return false
+  const earlier = await one(
+    'SELECT 1 AS x FROM user_devices WHERE address = $1 AND device_hash <> $2 AND first_seen < $3 LIMIT 1',
+    [address, deviceHash, row.first_seen],
+  )
+  return !!earlier
 }

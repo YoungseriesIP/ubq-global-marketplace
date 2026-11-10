@@ -7,6 +7,16 @@ export function getSessionToken(): string | null {
   return localStorage.getItem(SESSION_KEY)
 }
 
+/** Random id for this browser, used to recognise a returning device. Never contains personal data. */
+export function getDeviceId(): string {
+  let id = localStorage.getItem('tp_device_v1')
+  if (!id) {
+    id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('')
+    localStorage.setItem('tp_device_v1', id)
+  }
+  return id
+}
+
 export function setSessionToken(token: string | null): void {
   if (token) localStorage.setItem(SESSION_KEY, token)
   else localStorage.removeItem(SESSION_KEY)
@@ -74,6 +84,7 @@ export interface ApiListing {
   sellerAddress: string
   sellerName: string
   isDemo: boolean
+  sellerTrust?: { emailVerified: boolean; verifiedSales: number; complaints: number; trusted: boolean }
   imageUrl: string | null
   createdAt: string
 }
@@ -87,6 +98,8 @@ export interface ApiOrder {
   displayCurrency: string | null
   displayAmount: string | null
   txHash: string | null
+  status: 'pending_payment' | 'unverified' | 'verified' | 'failed'
+  verifiedNote: string | null
   createdAt: string
 }
 
@@ -107,6 +120,7 @@ export function toListing(a: ApiListing): Listing {
     sellerAddress: a.sellerAddress,
     sellerName: a.sellerName,
     isDemo: a.isDemo,
+    sellerTrust: a.sellerTrust,
     imageUrl: a.imageUrl ?? undefined,
     createdAt: new Date(a.createdAt),
   }
