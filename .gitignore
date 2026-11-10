@@ -1,0 +1,9 @@
+node_modules
+dist
+.env
+.env.*
+.circle/
+recovery_file*
+data/
+*.log
+deploy-vercel/
