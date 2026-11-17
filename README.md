@@ -47,6 +47,7 @@ Set these in `.env`. Never commit it.
 - `VITE_ESCROW_ADDRESS`: deployed escrow contract address to enable escrow payments (optional, public).
 - `VITE_DEFAULT_CHAIN_ID`: chain used for payments, defaults to Arc Testnet (optional).
 - `DATABASE_URL`: Postgres connection string (Neon). Required. Keep it secret and server-side only.
+- `CONTACT_EMAIL`: public contact address shown on the Privacy Notice and Terms pages (optional).
 - `APP_ENCRYPTION_KEY`: 64 hex characters. Encrypts staff authenticator secrets. Required for the staff console. Keep it secret and server-side only.
 - `ADMIN_BOOTSTRAP_ADDRESSES`: comma-separated wallet addresses of the first admins (server-side only). They still need the authenticator code.
 - `VITE_ADMIN_ADDRESSES`: comma-separated wallet addresses that see the admin button. Empty by default (optional, public).

@@ -23,9 +23,13 @@ import { config } from './config'
 import App from './App'
 import { AuthProvider } from './auth/AuthContext'
 import { SignInModal } from './auth/SignInModal'
+import { LegalPage } from './pages/LegalPage'
 import './index.css'
 
 const queryClient = new QueryClient()
+
+// Public notices open at their own addresses (Google asks for these links).
+const legalKind = window.location.pathname === '/privacy' ? 'privacy' : window.location.pathname === '/terms' ? 'terms' : null
 
 // Studio logo SVG
 const StudioLogo = () => (
@@ -74,8 +78,14 @@ createRoot(document.getElementById('root')!).render(
       <QueryClientProvider client={queryClient}>
         <ConnectKitProvider>
           <AuthProvider>
-            <App />
-            <SignInModal />
+            {legalKind ? (
+              <LegalPage kind={legalKind} />
+            ) : (
+              <>
+                <App />
+                <SignInModal />
+              </>
+            )}
           </AuthProvider>
           <StudioWatermark />
           <Toaster position="top-center" />

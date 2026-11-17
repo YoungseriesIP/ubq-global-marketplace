@@ -113,7 +113,9 @@ export function SignInModal() {
                 <span className="text-xs leading-relaxed" style={{ color: 'var(--muted)' }}>
                   I agree to the marketplace rules: no illegal items, fake documents or scams. I understand my sign-in activity
                   (device and time, not my identity documents) is recorded to keep accounts safe, and I can export or ask to delete my data
-                  from the Security page.
+                  from the Security page. Read the{' '}
+                  <a href="/terms" target="_blank" rel="noopener noreferrer" className="underline">Terms</a> and{' '}
+                  <a href="/privacy" target="_blank" rel="noopener noreferrer" className="underline">Privacy Notice</a>.
                 </span>
               </label>
 

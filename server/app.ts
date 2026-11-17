@@ -30,6 +30,7 @@ api.get('/config', (c) =>
     circleConfigured,
     circleAppId: process.env.VITE_CIRCLE_APP_ID ?? null,
     googleClientId: process.env.VITE_GOOGLE_CLIENT_ID ?? null,
+    contactEmail: process.env.CONTACT_EMAIL ?? null,
     escrowAddress: process.env.VITE_ESCROW_ADDRESS ?? null,
     chainId: DEFAULT_CHAIN_ID,
   }),
