@@ -99,3 +99,8 @@ Circle's own email-code step never delivered real codes through Gmail (test emai
 - `PATCH /api/listings/:id` edits price, wording, category, place and photo until a payment exists. New wording is re-checked for prohibited terms. `GET /api/listings/mine` returns the seller's own listings in every state.
 - Photos: the browser shrinks them, `POST /api/uploads/image` checks the real file type (JPEG, PNG or WebP, max 700 KB) and stores them in the database; `GET /api/images/:id` serves them with a locked-down policy.
 - Tests: `bun run test:unit` (29), `bun run test:listings` (24).
+
+## Update: faucet and wallet connection
+
+- Circle's faucet API (`/v1/faucet/drips`) needs a mainnet-upgraded account, so a test key gets 403. The app uses the public faucet at faucet.circle.com instead: `FaucetModal` copies the address, opens the faucet and polls the balance. It shows only on testnets.
+- Wallet sign-in uses wagmi's EIP-6963 discovery (each installed wallet appears by name) through `WalletSection`; ConnectKit was removed to make the page lighter. Optional `VITE_WALLETCONNECT_PROJECT_ID` adds a WalletConnect option. Wrong-network and rejected-request cases have plain-language messages (`walletErrors.ts`). Real wallets (MetaMask, Tabby) could not be tested in the build sandbox; the first live test on a phone and a desktop is the proof.

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
-import { X, Mail, Loader2, ShieldCheck, Wallet, AlertCircle } from 'lucide-react'
-import { ConnectKitButton } from 'connectkit'
-import { useAccount } from 'wagmi'
+import { X, Mail, Loader2, ShieldCheck, AlertCircle } from 'lucide-react'
+import { WalletSection } from './WalletSection'
 import { useAuth } from './AuthContext'
 
 function GoogleMark() {
@@ -18,9 +17,8 @@ function GoogleMark() {
 export function SignInModal() {
   const {
     signInOpen, closeSignIn, flow, config, user, needsReauth,
-    sendEmailCode, submitEmailCode, resetFlow, signInWithGoogle, signInWithWallet,
+    sendEmailCode, submitEmailCode, resetFlow, signInWithGoogle,
   } = useAuth()
-  const { isConnected } = useAccount()
   const [email, setEmail] = useState(user?.email ?? '')
   const [agreed, setAgreed] = useState(() => localStorage.getItem('tp_agreed_v1') === '1')
 
@@ -169,28 +167,7 @@ export function SignInModal() {
                 <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
               </div>
 
-              {isConnected ? (
-                <button
-                  onClick={() => void signInWithWallet()}
-                  disabled={!agreed}
-                  className="w-full min-h-[44px] py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 border transition-all active:scale-[0.98] disabled:opacity-50"
-                  style={{ background: 'var(--surface)', color: 'var(--ink)', borderColor: 'var(--border)' }}
-                >
-                  <Wallet size={15} /> Sign a message to continue (free)
-                </button>
-              ) : (
-                <ConnectKitButton.Custom>
-                  {({ show }) => (
-                    <button
-                      onClick={show}
-                      className="w-full min-h-[44px] py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 border transition-all active:scale-[0.98]"
-                      style={{ background: 'var(--surface)', color: 'var(--ink)', borderColor: 'var(--border)' }}
-                    >
-                      <Wallet size={15} /> I already have a crypto wallet
-                    </button>
-                  )}
-                </ConnectKitButton.Custom>
-              )}
+              <WalletSection agreed={agreed} />
 
               <div className="rounded-xl px-4 py-3 flex items-start gap-2" style={{ background: 'var(--surface-muted)' }}>
                 <ShieldCheck size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--accent)' }} />

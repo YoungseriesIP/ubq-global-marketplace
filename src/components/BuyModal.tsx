@@ -6,6 +6,7 @@ import { useAuth } from '@/auth/AuthContext'
 import { NeedsSignInError, useUsdcBalance, useWalletActions } from '@/auth/payments'
 import { useCurrency } from '@/lib/currency'
 import { api, ApiError } from '@/lib/api'
+import { FaucetModal } from './FaucetModal'
 import type { Listing } from '../types'
 
 interface BuyModalProps {
@@ -18,7 +19,7 @@ function friendlyError(error: unknown): string {
   const msg = ((error as { message?: string })?.message ?? '').toLowerCase()
   if (msg.includes('user rejected') || msg.includes('denied') || msg.includes('cancel')) return 'Payment cancelled.'
   if (msg.includes('insufficient') || msg.includes('exceeds balance')) return 'Not enough USDC in your wallet.'
-  if (msg.includes('connect the wallet')) return (error as Error).message
+  if (msg.includes('connect the wallet') || msg.includes('network switch') || msg.includes('could not switch')) return (error as Error).message
   if (msg.includes('network') || msg.includes('timeout')) return 'Network error. Please retry.'
   return 'The payment did not go through. Nothing was charged. Please try again.'
 }
@@ -30,6 +31,7 @@ export function BuyModal({ listing, onClose }: BuyModalProps) {
   const { localText, rateText } = useCurrency()
 
   const [confirmed, setConfirmed] = useState(false)
+  const [faucetOpen, setFaucetOpen] = useState(false)
   const [status, setStatus] = useState<'idle' | 'paying' | 'success' | 'pending' | 'error'>('idle')
   const [orderId, setOrderId] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
@@ -253,8 +255,15 @@ export function BuyModal({ listing, onClose }: BuyModalProps) {
                 <div className="rounded-xl px-4 py-3 flex items-center gap-2" style={{ background: 'rgba(186,43,76,0.08)' }}>
                   <AlertCircle size={15} style={{ color: 'var(--danger)' }} />
                   <span className="text-sm" style={{ color: 'var(--danger)' }}>
-                    Not enough USDC. Add test funds from the Arc Studio sidebar.
+                    Not enough USDC.
                   </span>
+                  <button
+                    onClick={() => setFaucetOpen(true)}
+                    className="ml-auto px-3 py-1.5 rounded-lg text-xs font-bold"
+                    style={{ background: 'var(--accent)', color: '#ffffff' }}
+                  >
+                    Get test USDC
+                  </button>
                 </div>
               )}
 
@@ -346,6 +355,7 @@ export function BuyModal({ listing, onClose }: BuyModalProps) {
           )}
         </div>
       </div>
+      {faucetOpen && <FaucetModal chainId={listing.chainId} onClose={() => setFaucetOpen(false)} />}
     </div>
   )
 }

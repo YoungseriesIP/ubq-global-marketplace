@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { erc20Abi } from 'viem'
 import type { Address } from 'viem'
 import { useAccount, usePublicClient, useReadContract, useSwitchChain, useWriteContract } from 'wagmi'
-import { getUsdc } from '@/onchain-facts'
+import { getUsdc, requireChain } from '@/onchain-facts'
 import { parseUsdc, formatUsdc } from '@/onchain-money'
 import { waitForSuccessfulTransaction } from '@/onchain-wait'
 import { api } from '@/lib/api'
@@ -72,7 +72,16 @@ export function useWalletActions(chainId: number) {
     if (!wagmiAddress || wagmiAddress.toLowerCase() !== user?.address.toLowerCase()) {
       throw new Error('Connect the wallet you signed in with to continue.')
     }
-    if (wagmiChainId !== chainId) await switchChainAsync({ chainId })
+    if (wagmiChainId !== chainId) {
+      try {
+        await switchChainAsync({ chainId })
+      } catch (e) {
+        const m = ((e as { message?: string }).message ?? '').toLowerCase()
+        if (m.includes('rejected') || m.includes('denied')) throw new Error('Please approve the network switch in your wallet, then try again.')
+        const c = requireChain(chainId)
+        throw new Error(`Your wallet could not switch to ${c.name}. Add the network by hand: chain ID ${c.chainId}, RPC ${c.rpcUrls[0]}, currency ${c.nativeCurrency.symbol}.`)
+      }
+    }
   }, [wagmiAddress, wagmiChainId, user, chainId, switchChainAsync])
 
   const waitReceipt = useCallback(async (hash: `0x${string}`) => {

@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, Copy, LogOut, ShieldCheck, ShieldAlert, Store, Wallet } from 'lucide-react'
+import { ChevronDown, Copy, Droplets, LogOut, ShieldCheck, ShieldAlert, Store, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from './AuthContext'
 import { useUsdcBalance } from './payments'
 import { useCurrency } from '@/lib/currency'
 import { api } from '@/lib/api'
+import { FaucetModal } from '@/components/FaucetModal'
+import { requireChain } from '@/onchain-facts'
 
 interface AccountMenuProps {
   chainId: number
@@ -19,6 +21,8 @@ export function AccountMenu({ chainId, onOpenShop, onOpenSecurity, onOpenStaff }
   const { localText } = useCurrency()
   const [open, setOpen] = useState(false)
   const [isStaff, setIsStaff] = useState(false)
+  const [faucetOpen, setFaucetOpen] = useState(false)
+  const isTestnet = requireChain(chainId).isTestnet
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -103,9 +107,15 @@ export function AccountMenu({ chainId, onOpenShop, onOpenSecurity, onOpenStaff }
               <span className="truncate">{user.address}</span>
               <Copy size={12} className="shrink-0" />
             </button>
-            <p className="text-[11px] mt-2 leading-relaxed" style={{ color: 'var(--subtle)' }}>
-              To add test money, use &quot;Get test USDC&quot; in the Arc Studio sidebar with this address.
-            </p>
+            {isTestnet && (
+              <button
+                onClick={() => { setOpen(false); setFaucetOpen(true) }}
+                className="mt-2 w-full min-h-[40px] rounded-lg text-xs font-bold flex items-center justify-center gap-1.5"
+                style={{ background: 'var(--accent)', color: '#ffffff' }}
+              >
+                <Droplets size={13} /> Get free test USDC
+              </button>
+            )}
           </div>
 
           <button
@@ -144,6 +154,7 @@ export function AccountMenu({ chainId, onOpenShop, onOpenSecurity, onOpenStaff }
           </button>
         </div>
       )}
+      {faucetOpen && <FaucetModal chainId={chainId} onClose={() => setFaucetOpen(false)} />}
     </div>
   )
 }

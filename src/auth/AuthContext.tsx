@@ -38,7 +38,7 @@ interface AuthContextValue {
   submitEmailCode: (email: string, code: string) => Promise<void>
   resetFlow: () => void
   signInWithGoogle: () => Promise<void>
-  signInWithWallet: () => Promise<void>
+  signInWithWallet: (address?: string) => Promise<void>
   signOut: () => Promise<void>
   refreshUser: () => Promise<void>
   updateProfile: (patch: Partial<Pick<AppUser, 'displayName' | 'shopName' | 'shopBio' | 'countryCode'>>) => Promise<void>
@@ -266,13 +266,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   // ── Existing wallet (signature, no gas) ─────────────────────────────────
-  const signInWithWallet = useCallback(async () => {
-    if (!wagmiAddress) { setFlow({ step: 'error', message: 'Connect a wallet first.' }); return }
+  const signInWithWallet = useCallback(async (addressOverride?: string) => {
+    const walletAddress = addressOverride ?? wagmiAddress
+    if (!walletAddress) { setFlow({ step: 'error', message: 'Connect a wallet first.' }); return }
     try {
       setFlow({ step: 'verifying', message: 'Approve the signature request in your wallet.' })
-      const { message } = await api<{ message: string }>('/auth/nonce', { body: { address: wagmiAddress }, auth: false })
+      const { message } = await api<{ message: string }>('/auth/nonce', { body: { address: walletAddress }, auth: false })
       const signature = await signMessageAsync({ message })
-      const r = await api<{ token: string }>('/auth/verify', { body: { address: wagmiAddress, signature, deviceId: getDeviceId() }, auth: false })
+      const r = await api<{ token: string }>('/auth/verify', { body: { address: walletAddress, signature, deviceId: getDeviceId() }, auth: false })
       setSessionToken(r.token)
       const me = await api<{ user: AppUser }>('/me')
       setUser(me.user)
