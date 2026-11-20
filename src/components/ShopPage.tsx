@@ -3,16 +3,18 @@ import { PackageOpen, Store, Pencil, ExternalLink, ArrowDownLeft, ArrowUpRight }
 import { toast } from 'sonner'
 import { useAuth } from '@/auth/AuthContext'
 import { useCurrency } from '@/lib/currency'
-import { api } from '@/lib/api'
-import type { ApiOrder } from '@/lib/api'
+import { api, toListing } from '@/lib/api'
+import type { ApiListing, ApiOrder } from '@/lib/api'
 import { buildTxExplorerUrl } from '@/onchain-facts'
 import { ListingCard } from './ListingCard'
 import type { Listing } from '../types'
 
 interface ShopPageProps {
-  listings: Listing[]
   onSell: () => void
   onRemove: (id: string) => void
+  onEdit: (listing: Listing) => void
+  /** Changes whenever a listing is created, edited or removed. */
+  reloadKey: number
 }
 
 const inputStyle = { background: 'var(--surface-muted)', color: 'var(--ink)', border: '1.5px solid var(--border)' }
@@ -33,10 +35,11 @@ function StatusPill({ status }: { status: ApiOrder['status'] }) {
   )
 }
 
-export function ShopPage({ listings, onSell, onRemove }: ShopPageProps) {
+export function ShopPage({ onSell, onRemove, onEdit, reloadKey }: ShopPageProps) {
   const { user, loading, openSignIn, updateProfile, config } = useAuth()
   const { localText } = useCurrency()
   const [orders, setOrders] = useState<ApiOrder[]>([])
+  const [listings, setListings] = useState<Listing[]>([])
   const [editing, setEditing] = useState(false)
   const [shopName, setShopName] = useState('')
   const [shopBio, setShopBio] = useState('')
@@ -51,6 +54,15 @@ export function ShopPage({ listings, onSell, onRemove }: ShopPageProps) {
       /* the status stays as it was */
     }
   }
+
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+    api<{ listings: ApiListing[] }>('/listings/mine')
+      .then((r) => { if (!cancelled) setListings(r.listings.map(toListing)) })
+      .catch(() => { /* the list stays as it was */ })
+    return () => { cancelled = true }
+  }, [user, reloadKey])
 
   useEffect(() => {
     if (!user) return
@@ -203,7 +215,7 @@ export function ShopPage({ listings, onSell, onRemove }: ShopPageProps) {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             {listings.map((l) => (
-              <ListingCard key={l.id} listing={l} onBuy={() => {}} isOwner onRemove={onRemove} />
+              <ListingCard key={l.id} listing={l} onBuy={() => {}} isOwner onRemove={onRemove} onEdit={onEdit} />
             ))}
           </div>
         )}

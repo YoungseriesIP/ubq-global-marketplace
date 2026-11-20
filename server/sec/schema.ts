@@ -207,4 +207,14 @@ export const SEC_SCHEMA: string[] = [
     window_start DOUBLE PRECISION NOT NULL,
     last_sent_at DOUBLE PRECISION NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS images (
+    id         TEXT PRIMARY KEY,
+    owner      TEXT NOT NULL,
+    mime       TEXT NOT NULL,
+    data       TEXT NOT NULL,
+    created_at DOUBLE PRECISION NOT NULL
+  )`,
+  'CREATE INDEX IF NOT EXISTS idx_images_owner ON images (owner)',
+  // One-time shelf clean-up: items already paid for should not stay on sale.
+  `UPDATE listings SET status = 'sold' WHERE status = 'active' AND id IN (SELECT listing_id FROM orders WHERE status = 'verified')`,
 ]

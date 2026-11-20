@@ -1,9 +1,10 @@
-import { useState } from 'react'
-import { X, Upload, ChevronDown } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { X, Camera, Loader2, ChevronDown } from 'lucide-react'
 import { useAuth } from '@/auth/AuthContext'
 import { COUNTRY_LIST } from '@/services/useCountryFilter'
 import { toast } from 'sonner'
 import { api, toListing } from '@/lib/api'
+import { uploadImage } from '@/lib/imageUpload'
 import type { ApiListing } from '@/lib/api'
 import type { Listing, Category } from '../types'
 
@@ -12,23 +13,43 @@ const CATEGORIES: Category[] = [
 ]
 
 interface CreateListingModalProps {
+  /** Pass an existing listing to edit it instead of creating a new one. */
+  listing?: Listing
   onClose: () => void
   onCreated: (listing: Listing) => void
+  onChanged?: () => void
 }
 
-export function CreateListingModal({ onClose, onCreated }: CreateListingModalProps) {
+export function CreateListingModal({ listing, onClose, onCreated, onChanged }: CreateListingModalProps) {
   const { user, openSignIn } = useAuth()
   const address = user?.address
 
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [price, setPrice] = useState('')
-  const [category, setCategory] = useState<Category>('Electronics')
-  const [location, setLocation] = useState('')
-  const [countryCode, setCountryCode] = useState(user?.countryCode ?? '')
-  const [imageUrl, setImageUrl] = useState('')
+  const editing = listing !== undefined
+  const [title, setTitle] = useState(listing?.title ?? '')
+  const [description, setDescription] = useState(listing?.description ?? '')
+  const [price, setPrice] = useState(listing?.priceUsdc ?? '')
+  const [category, setCategory] = useState<Category>((listing?.category as Category | undefined) ?? 'Electronics')
+  const [location, setLocation] = useState(listing?.location ?? '')
+  const [countryCode, setCountryCode] = useState(listing?.countryCode ?? user?.countryCode ?? '')
+  const [imageUrl, setImageUrl] = useState(listing?.imageUrl ?? '')
+  const [uploading, setUploading] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+
+  async function handlePhoto(file: File | undefined) {
+    if (!file) return
+    setError('')
+    setUploading(true)
+    try {
+      setImageUrl(await uploadImage(file))
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setUploading(false)
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -50,7 +71,8 @@ export function CreateListingModal({ onClose, onCreated }: CreateListingModalPro
 
     setSaving(true)
     try {
-      const res = await api<{ listing: ApiListing; held?: boolean }>('/listings', {
+      const res = await api<{ listing: ApiListing; held?: boolean }>(editing ? `/listings/${listing.id}` : '/listings', {
+        method: editing ? 'PATCH' : 'POST',
         body: {
           title: title.trim(),
           description: description.trim(),
@@ -58,9 +80,15 @@ export function CreateListingModal({ onClose, onCreated }: CreateListingModalPro
           category,
           location: location.trim(),
           countryCode: countryCode || undefined,
-          imageUrl: imageUrl.trim() || undefined,
+          imageUrl: editing ? (imageUrl.trim() || null) : (imageUrl.trim() || undefined),
         },
       })
+      onChanged?.()
+      if (editing) {
+        toast.success(res.held ? 'Saved. The new wording needs a quick review.' : 'Your changes are saved')
+        onClose()
+        return
+      }
       if (res.held) {
         toast.message('Your listing is waiting for a quick review', {
           description: 'Some wording needs a human check before it goes public. We will publish it if it is fine.',
@@ -96,7 +124,7 @@ export function CreateListingModal({ onClose, onCreated }: CreateListingModalPro
           style={{ borderColor: 'var(--border)' }}
         >
           <h2 className="display font-bold text-lg" style={{ color: 'var(--ink)' }}>
-            List an Item
+            {editing ? 'Edit your listing' : 'List an Item'}
           </h2>
           <button
             onClick={onClose}
@@ -266,32 +294,68 @@ export function CreateListingModal({ onClose, onCreated }: CreateListingModalPro
             </div>
           </div>
 
-          {/* Image URL */}
+          {/* Photo */}
           <div>
             <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--ink-2)' }}>
-              Image URL <span className="font-normal" style={{ color: 'var(--subtle)' }}>(optional)</span>
+              Photo <span className="font-normal" style={{ color: 'var(--subtle)' }}>(optional)</span>
             </label>
-            <div className="relative">
-              <Upload
-                size={14}
-                className="absolute left-3 top-1/2 -translate-y-1/2"
-                style={{ color: 'var(--muted)' }}
-              />
-              <input
-                type="url"
-                value={imageUrl}
-                onChange={(e) => setImageUrl(e.target.value)}
-                placeholder="https://example.com/image.jpg"
-                className="w-full pl-8 pr-4 py-3 rounded-xl text-sm outline-none transition-all"
-                style={{
-                  background: 'var(--surface-muted)',
-                  color: 'var(--ink)',
-                  border: '1.5px solid var(--border)',
-                }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--focus)')}
-                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
-              />
-            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => void handlePhoto(e.target.files?.[0])}
+            />
+            {imageUrl ? (
+              <div className="flex items-center gap-3">
+                <img
+                  referrerPolicy="no-referrer"
+                  src={imageUrl}
+                  alt="Your item"
+                  className="w-24 h-24 rounded-xl object-cover"
+                  style={{ border: '1.5px solid var(--border)' }}
+                />
+                <div className="flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileRef.current?.click()}
+                    disabled={uploading}
+                    className="px-3 py-2 rounded-lg text-xs font-semibold disabled:opacity-50"
+                    style={{ background: 'var(--surface-muted)', color: 'var(--accent)' }}
+                  >
+                    {uploading ? 'Uploading…' : 'Change photo'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setImageUrl('')}
+                    className="px-3 py-2 rounded-lg text-xs font-semibold"
+                    style={{ background: 'var(--surface-muted)', color: 'var(--danger)' }}
+                  >
+                    Remove photo
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading}
+                className="w-full min-h-[88px] rounded-xl flex flex-col items-center justify-center gap-1.5 text-sm font-semibold disabled:opacity-60"
+                style={{ background: 'var(--surface-muted)', color: 'var(--ink-2)', border: '1.5px dashed var(--border)' }}
+              >
+                {uploading ? <Loader2 size={18} className="animate-spin" /> : <Camera size={18} />}
+                {uploading ? 'Uploading your photo…' : 'Take or choose a photo'}
+                <span className="text-xs font-normal" style={{ color: 'var(--subtle)' }}>It is shrunk automatically</span>
+              </button>
+            )}
+            <input
+              type="url"
+              value={imageUrl.startsWith('/api/') ? '' : imageUrl}
+              onChange={(e) => setImageUrl(e.target.value)}
+              placeholder="or paste a photo link: https://…"
+              className="mt-2 w-full px-4 py-2.5 rounded-xl text-xs outline-none"
+              style={{ background: 'var(--surface-muted)', color: 'var(--ink)', border: '1.5px solid var(--border)' }}
+            />
           </div>
 
           {/* Error */}
@@ -315,11 +379,11 @@ export function CreateListingModal({ onClose, onCreated }: CreateListingModalPro
           {address ? (
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || uploading}
               className="w-full min-h-[44px] py-3.5 rounded-xl text-sm font-bold transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ background: 'var(--accent)', color: '#ffffff' }}
             >
-              {saving ? 'Listing…' : 'List for Sale'}
+              {saving ? 'Saving…' : editing ? 'Save changes' : 'List for Sale'}
             </button>
           ) : (
             <button

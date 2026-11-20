@@ -41,8 +41,8 @@ payments.post('/precheck', rateLimit('precheck', 30, 60_000), async (c) => {
 
   // Idempotent: the same buyer paying for the same listing reuses one open order.
   const open = await one<OrderRow>(
-    "SELECT * FROM orders WHERE buyer = $1 AND listing_id = $2 AND status = 'pending_payment' AND expires_at > $3 ORDER BY created_at DESC LIMIT 1",
-    [user.address, l.id, Date.now()],
+    "SELECT * FROM orders WHERE buyer = $1 AND listing_id = $2 AND status = 'pending_payment' AND expires_at > $3 AND amount_usdc = $4 ORDER BY created_at DESC LIMIT 1",
+    [user.address, l.id, Date.now(), l.price_usdc],
   )
   if (open) {
     return c.json({ orderId: open.id, payTo: l.seller, amountUsdc: l.price_usdc, chainId: DEFAULT_CHAIN_ID, decision: 'allow', reused: true })
@@ -109,6 +109,25 @@ export async function settleOrder(order: OrderRow, txHash: string): Promise<{ st
     )
   } catch {
     return { status: 'failed', note: 'This transaction was already used for another order.' }
+  }
+  // Keep the shelf honest: a paid item leaves the marketplace, a payment still being confirmed holds it.
+  if (status === 'verified') {
+    const other = await one<{ id: string }>(
+      "SELECT id FROM orders WHERE listing_id = $1 AND status = 'verified' AND id <> $2 LIMIT 1",
+      [order.listing_id, order.id],
+    )
+    if (other) {
+      await openCase({ kind: 'payment_anomaly', severity: 'high', subject: order.seller, title: `Item sold twice: order ${order.id.slice(0, 8)}`, summary: 'Two buyers paid for the same item. The later buyer may need a refund from the seller.', by: 'system' })
+    }
+    await exec("UPDATE listings SET status = 'sold' WHERE id = $1 AND status IN ('active','reserved')", [order.listing_id])
+  } else if (status === 'unverified') {
+    await exec("UPDATE listings SET status = 'reserved' WHERE id = $1 AND status = 'active'", [order.listing_id])
+  } else {
+    await exec(
+      `UPDATE listings SET status = 'active' WHERE id = $1 AND status = 'reserved' AND NOT EXISTS (
+         SELECT 1 FROM orders WHERE listing_id = $1 AND id <> $2 AND status IN ('unverified','verified'))`,
+      [order.listing_id, order.id],
+    )
   }
   if (status === 'verified') {
     await audit({ actor: 'system', action: 'payment.verified', target: order.id, details: { txHash, amount: order.amount_usdc } })

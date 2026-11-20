@@ -135,6 +135,8 @@ try {
   check('an unconfirmed transaction is never marked paid', cf.status === 200 && cf.json.status !== 'verified', cf.json)
   check('another user cannot confirm my order', (await call('POST', `/payments/${pc.json.orderId}/confirm`, tO, { txHash: fakeTx }, 'other')).status === 404)
   check('a bad transaction hash is rejected', (await call('POST', `/payments/${pc.json.orderId}/confirm`, tB, { txHash: '0x123' }, 'buyer')).status === 400)
+  // The unconfirmed payment above rightly holds the item; put it back on sale for the checks that follow.
+  await sql.query("UPDATE listings SET status = 'active' WHERE id = $1", [good.json.listing.id])
   const rc = await call('GET', `/payments/${pc.json.orderId}/receipt`, tB, undefined, 'buyer')
   check('receipt shows the true status', rc.json.receipt?.verified === false && rc.json.receipt?.status !== 'verified', rc.json)
   check('legacy self-reported order route is gone', (await call('POST', '/orders', tB, { listingId: good.json.listing.id, txHash: fakeTx }, 'buyer')).status === 404)

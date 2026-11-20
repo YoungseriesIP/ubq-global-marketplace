@@ -8,6 +8,7 @@ interface ListingCardProps {
   onBuy: (listing: Listing) => void
   isOwner?: boolean
   onRemove?: (id: string) => void
+  onEdit?: (listing: Listing) => void
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -21,7 +22,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   Other: '#374151',
 }
 
-export function ListingCard({ listing, onBuy, isOwner, onRemove }: ListingCardProps) {
+export function ListingCard({ listing, onBuy, isOwner, onRemove, onEdit }: ListingCardProps) {
   const categoryColor = CATEGORY_COLORS[listing.category] ?? CATEGORY_COLORS['Other']
   const timeAgo = getTimeAgo(listing.createdAt)
   const { localText } = useCurrency()
@@ -123,13 +124,36 @@ export function ListingCard({ listing, onBuy, isOwner, onRemove }: ListingCardPr
           </div>
 
           {isOwner ? (
-            <button
-              onClick={() => onRemove?.(listing.id)}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95"
-              style={{ background: 'var(--surface-muted)', color: 'var(--danger)' }}
-            >
-              Remove
-            </button>
+            listing.status === 'sold' || listing.status === 'reserved' ? (
+              <span
+                className="px-3 py-1.5 rounded-lg text-xs font-bold"
+                style={listing.status === 'sold'
+                  ? { background: 'rgba(26,128,71,0.12)', color: 'var(--success)' }
+                  : { background: 'rgba(245,158,11,0.14)', color: '#92400e' }}
+              >
+                {listing.status === 'sold' ? 'Sold' : 'Payment pending'}
+              </span>
+            ) : (
+              <div className="flex items-center gap-2">
+                {listing.status === 'review' && (
+                  <span className="text-xs font-semibold" style={{ color: '#92400e' }}>Under review</span>
+                )}
+                <button
+                  onClick={() => onEdit?.(listing)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95"
+                  style={{ background: 'var(--surface-muted)', color: 'var(--accent)' }}
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => onRemove?.(listing.id)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95"
+                  style={{ background: 'var(--surface-muted)', color: 'var(--danger)' }}
+                >
+                  Remove
+                </button>
+              </div>
+            )
           ) : (
             <button
               onClick={() => onBuy(listing)}

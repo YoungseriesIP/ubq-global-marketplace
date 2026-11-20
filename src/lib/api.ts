@@ -87,6 +87,7 @@ export interface ApiListing {
   isDemo: boolean
   sellerTrust?: { emailVerified: boolean; verifiedSales: number; complaints: number; trusted: boolean }
   imageUrl: string | null
+  status?: string
   createdAt: string
 }
 
@@ -122,6 +123,7 @@ export function toListing(a: ApiListing): Listing {
     sellerName: a.sellerName,
     isDemo: a.isDemo,
     sellerTrust: a.sellerTrust,
+    status: a.status as Listing['status'],
     imageUrl: a.imageUrl ?? undefined,
     createdAt: new Date(a.createdAt),
   }

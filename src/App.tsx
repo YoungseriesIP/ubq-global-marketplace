@@ -58,6 +58,7 @@ export default function App() {
   }, [user])
   const [showAdmin, setShowAdmin] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
+  const [editTarget, setEditTarget] = useState<Listing | null>(null)
   const [buyTarget, setBuyTarget] = useState<Listing | null>(null)
   const [listings, setListings]   = useState<Listing[]>([])
   const [listingsLoading, setListingsLoading] = useState(true)
@@ -85,12 +86,6 @@ export default function App() {
       return matchesCategory && matchesQuery && matchesCountry
     })
   }, [listings, query, activeCategory, countryFilter.country])
-
-  // My listings
-  const myListings = useMemo(
-    () => (address ? listings.filter((l) => l.sellerAddress.toLowerCase() === address.toLowerCase()) : []),
-    [listings, address],
-  )
 
   // Shared listings from every seller, loaded from the API
   const [reloadKey, setReloadKey] = useState(0)
@@ -127,6 +122,7 @@ export default function App() {
     try {
       await api(`/listings/${id}`, { method: 'DELETE' })
       setListings((prev) => prev.filter((l) => l.id !== id))
+      setReloadKey((k) => k + 1)
     } catch (e) {
       toast.error((e as Error).message)
     }
@@ -209,7 +205,8 @@ export default function App() {
 
         {view === 'my-listings' && (
           <ShopPage
-            listings={myListings}
+            reloadKey={reloadKey}
+            onEdit={setEditTarget}
             onSell={() => setShowCreate(true)}
             onRemove={(id) => void handleRemove(id)}
           />
@@ -217,16 +214,18 @@ export default function App() {
       </main>
 
       {/* Modals */}
-      {showCreate && (
+      {(showCreate || editTarget) && (
         <CreateListingModal
-          onClose={() => setShowCreate(false)}
+          listing={editTarget ?? undefined}
+          onClose={() => { setShowCreate(false); setEditTarget(null) }}
           onCreated={handleCreated}
+          onChanged={() => setReloadKey((k) => k + 1)}
         />
       )}
       {buyTarget && (
         <BuyModal
           listing={buyTarget}
-          onClose={() => setBuyTarget(null)}
+          onClose={() => { setBuyTarget(null); setReloadKey((k) => k + 1) }}
         />
       )}
 

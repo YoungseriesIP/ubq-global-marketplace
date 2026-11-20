@@ -92,3 +92,10 @@ Circle's own email-code step never delivered real codes through Gmail (test emai
 - `/api/config` reports `emailLogin: "own"` when `SMTP_USER`, `SMTP_PASS` and `APP_ENCRYPTION_KEY` are set; otherwise the old Circle email-code path is used.
 - Tests: `bun run test:unit` (26) and `bun run test:email` (14, real database and Circle test environment, dev-mail mode). The real Gmail send is only proven by a live test on the deployed site.
 - Vercel settings added: `SMTP_USER`, `SMTP_PASS` (secret), `VITE_GOOGLE_CLIENT_ID` (config). Google app is published; Privacy and Terms pages live at /privacy and /terms.
+
+## Update: sold items, editing and photo upload
+
+- Listing states: active, review (held), reserved (a payment is awaiting confirmation), sold, removed. `settleOrder` moves the listing; schema v5 also marks already-paid items sold.
+- `PATCH /api/listings/:id` edits price, wording, category, place and photo until a payment exists. New wording is re-checked for prohibited terms. `GET /api/listings/mine` returns the seller's own listings in every state.
+- Photos: the browser shrinks them, `POST /api/uploads/image` checks the real file type (JPEG, PNG or WebP, max 700 KB) and stores them in the database; `GET /api/images/:id` serves them with a locked-down policy.
+- Tests: `bun run test:unit` (29), `bun run test:listings` (24).

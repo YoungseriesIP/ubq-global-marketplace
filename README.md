@@ -72,6 +72,8 @@ Circle Console setup for email and Google sign-in: configure email (SMTP) and th
 - Every purchase is checked before payment (limits, restrictions, risk score) and verified on the network afterwards. A payment is never marked paid on the buyer's word.
 - Staff console with roles (support, compliance, finance, admin), authenticator codes, cases, appeals, incident log, payment re-checks and a tamper-evident audit log. Sensitive changes need a second admin once two exist.
 - Listings with prohibited wording, or reported by three people, are held for human review. Account restrictions from automatic checks last one day and can be appealed.
+- Sellers can edit a listing (price, wording, photo) until someone pays; photos can be taken or chosen on the phone and are shrunk automatically.
+- A paid item leaves the shelf (sold), an item with a payment still being confirmed is held, and a payment that never confirms puts it back on sale after six hours.
 - Data export and deletion requests; identity documents are never stored.
 
-Not included yet: identity (KYC) and business (KYB) verification, sanctions and wallet screening, real-inbox email alerts. These need provider accounts and legal review. Run the checks with `bun run test:unit`, `bun run test:security` and `bun run test:email` (the second uses the real database with throwaway data).
+Not included yet: identity (KYC) and business (KYB) verification, sanctions and wallet screening, real-inbox email alerts. These need provider accounts and legal review. Run the checks with `bun run test:unit`, `bun run test:security` and `bun run test:email` and `bun run test:listings` (the second uses the real database with throwaway data).

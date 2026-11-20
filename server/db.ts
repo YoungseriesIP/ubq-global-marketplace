@@ -92,7 +92,7 @@ export async function batch(stmts: Stmt[]): Promise<void> {
 let readyPromise: Promise<void> | null = null
 
 // Bump this whenever SCHEMA or SEC_SCHEMA changes. Cold starts then cost one cheap query instead of ~50.
-const SCHEMA_VERSION = 3
+const SCHEMA_VERSION = 5
 
 async function init(): Promise<void> {
   const current = await rawQuery<{ value: string }>(
@@ -150,6 +150,13 @@ export async function pruneExpired(): Promise<void> {
     ['DELETE FROM sessions WHERE expires_at < $1', [now]],
     ['DELETE FROM nonces WHERE expires_at < $1', [now]],
     ['DELETE FROM rate_limits WHERE reset_at < $1', [now]],
+    // An item held for a payment that never confirmed goes back on sale after 6 hours.
+    [
+      `UPDATE listings SET status = 'active' WHERE status = 'reserved' AND NOT EXISTS (
+         SELECT 1 FROM orders o WHERE o.listing_id = listings.id
+           AND (o.status = 'verified' OR (o.status = 'unverified' AND o.created_at > $1)))`,
+      [now - 6 * 3_600_000],
+    ],
   ])
 }
 

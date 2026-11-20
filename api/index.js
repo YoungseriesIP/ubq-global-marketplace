@@ -47268,7 +47268,16 @@ var SEC_SCHEMA = [
     sends        INTEGER NOT NULL DEFAULT 1,
     window_start DOUBLE PRECISION NOT NULL,
     last_sent_at DOUBLE PRECISION NOT NULL
-  )`
+  )`,
+  `CREATE TABLE IF NOT EXISTS images (
+    id         TEXT PRIMARY KEY,
+    owner      TEXT NOT NULL,
+    mime       TEXT NOT NULL,
+    data       TEXT NOT NULL,
+    created_at DOUBLE PRECISION NOT NULL
+  )`,
+  "CREATE INDEX IF NOT EXISTS idx_images_owner ON images (owner)",
+  `UPDATE listings SET status = 'sold' WHERE status = 'active' AND id IN (SELECT listing_id FROM orders WHERE status = 'verified')`
 ];
 
 // server/db.ts
@@ -47350,7 +47359,7 @@ async function batch(stmts) {
   await c.transaction(stmts.map(([text, params]) => c.query(text, params ?? [])));
 }
 var readyPromise = null;
-var SCHEMA_VERSION = 3;
+var SCHEMA_VERSION = 5;
 async function init() {
   const current = await rawQuery("SELECT value FROM security_config WHERE key = 'schema_version'").catch(() => []);
   if (current[0]?.value === String(SCHEMA_VERSION))
@@ -47393,7 +47402,13 @@ async function pruneExpired() {
   await batch([
     ["DELETE FROM sessions WHERE expires_at < $1", [now]],
     ["DELETE FROM nonces WHERE expires_at < $1", [now]],
-    ["DELETE FROM rate_limits WHERE reset_at < $1", [now]]
+    ["DELETE FROM rate_limits WHERE reset_at < $1", [now]],
+    [
+      `UPDATE listings SET status = 'active' WHERE status = 'reserved' AND NOT EXISTS (
+         SELECT 1 FROM orders o WHERE o.listing_id = listings.id
+           AND (o.status = 'verified' OR (o.status = 'unverified' AND o.created_at > $1)))`,
+      [now - 6 * 3600000]
+    ]
   ]);
 }
 function demoAddress(n) {
@@ -48710,7 +48725,7 @@ payments.post("/precheck", rateLimit("precheck", 30, 60000), async (c) => {
   if (await activeRestriction(seller.address, "sell")) {
     return c.json({ error: "This seller is temporarily unavailable." }, 409);
   }
-  const open = await one("SELECT * FROM orders WHERE buyer = $1 AND listing_id = $2 AND status = 'pending_payment' AND expires_at > $3 ORDER BY created_at DESC LIMIT 1", [user.address, l.id, Date.now()]);
+  const open = await one("SELECT * FROM orders WHERE buyer = $1 AND listing_id = $2 AND status = 'pending_payment' AND expires_at > $3 AND amount_usdc = $4 ORDER BY created_at DESC LIMIT 1", [user.address, l.id, Date.now(), l.price_usdc]);
   if (open) {
     return c.json({ orderId: open.id, payTo: l.seller, amountUsdc: l.price_usdc, chainId: DEFAULT_CHAIN_ID, decision: "allow", reused: true });
   }
@@ -48765,6 +48780,18 @@ async function settleOrder(order2, txHash) {
     await exec(`UPDATE orders SET tx_hash = $2, status = $3, verify_note = $4, verified_at = $5 WHERE id = $1 AND status <> 'verified'`, [order2.id, txHash, status, result.note, status === "verified" ? Date.now() : null]);
   } catch {
     return { status: "failed", note: "This transaction was already used for another order." };
+  }
+  if (status === "verified") {
+    const other = await one("SELECT id FROM orders WHERE listing_id = $1 AND status = 'verified' AND id <> $2 LIMIT 1", [order2.listing_id, order2.id]);
+    if (other) {
+      await openCase({ kind: "payment_anomaly", severity: "high", subject: order2.seller, title: `Item sold twice: order ${order2.id.slice(0, 8)}`, summary: "Two buyers paid for the same item. The later buyer may need a refund from the seller.", by: "system" });
+    }
+    await exec("UPDATE listings SET status = 'sold' WHERE id = $1 AND status IN ('active','reserved')", [order2.listing_id]);
+  } else if (status === "unverified") {
+    await exec("UPDATE listings SET status = 'reserved' WHERE id = $1 AND status = 'active'", [order2.listing_id]);
+  } else {
+    await exec(`UPDATE listings SET status = 'active' WHERE id = $1 AND status = 'reserved' AND NOT EXISTS (
+         SELECT 1 FROM orders WHERE listing_id = $1 AND id <> $2 AND status IN ('unverified','verified'))`, [order2.listing_id, order2.id]);
   }
   if (status === "verified") {
     await audit({ actor: "system", action: "payment.verified", target: order2.id, details: { txHash, amount: order2.amount_usdc } });
@@ -61853,6 +61880,25 @@ emailAuth.post("/verify", rateLimit("email-verify", 30, 10 * 60000), async (c) =
   }
 });
 
+// server/sec/images.ts
+var MAX_IMAGE_BYTES = 700000;
+function detectImage(b2) {
+  if (b2.length < 16)
+    return null;
+  if (b2[0] === 255 && b2[1] === 216 && b2[2] === 255)
+    return "image/jpeg";
+  if (b2[0] === 137 && b2[1] === 80 && b2[2] === 78 && b2[3] === 71 && b2[4] === 13 && b2[5] === 10 && b2[6] === 26 && b2[7] === 10)
+    return "image/png";
+  const tag = (o, s) => s.split("").every((ch, i) => b2[o + i] === ch.charCodeAt(0));
+  if (tag(0, "RIFF") && tag(8, "WEBP"))
+    return "image/webp";
+  return null;
+}
+var OWN_IMAGE = /^\/api\/images\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+function isOwnImagePath(v2) {
+  return OWN_IMAGE.test(v2);
+}
+
 // server/app.ts
 var CATEGORIES = new Set(["Electronics", "Fashion", "Art", "Books", "Collectibles", "Home", "Sports", "Other"]);
 var DEFAULT_CHAIN = requireChain(DEFAULT_CHAIN_ID);
@@ -61994,6 +62040,7 @@ function toListing(r) {
       trusted: r.verified_sales >= 3 && r.complaints === 0
     },
     imageUrl: r.image_url,
+    status: r.status,
     createdAt: new Date(r.created_at).toISOString()
   };
 }
@@ -62014,9 +62061,9 @@ api.post("/listings", requireAuth, rateLimit("listing", 20, 60000), async (c) =>
     return c.json({ error: "Title, description, price, category and location are required." }, 400);
   }
   const imageRaw = body.imageUrl;
-  const imageUrl = imageRaw ? httpsUrl(imageRaw) : null;
+  const imageUrl = imageRaw ? listingImage(imageRaw) : null;
   if (imageRaw && !imageUrl)
-    return c.json({ error: "Image must be a valid https link." }, 400);
+    return c.json({ error: "Add a photo from your device or a valid https link." }, 400);
   const cc = countryCode(body.countryCode) ?? user.country_code;
   if (await activeRestriction(user.address, "sell")) {
     return c.json({ error: "Selling on your account is temporarily paused. You can appeal from the Security page." }, 403);
@@ -62042,9 +62089,96 @@ api.post("/listings", requireAuth, rateLimit("listing", 20, 60000), async (c) =>
     return c.json({ error: "Could not save the listing." }, 500);
   return c.json({ listing: toListing(row), held: flagged }, 201);
 });
+function listingImage(v2) {
+  if (typeof v2 === "string" && isOwnImagePath(v2))
+    return v2;
+  return httpsUrl(v2);
+}
+api.post("/uploads/image", requireAuth, rateLimit("upload", 20, 600000), async (c) => {
+  const user = c.get("user");
+  const bytes = new Uint8Array(await c.req.arrayBuffer());
+  if (bytes.length === 0)
+    return c.json({ error: "No photo received." }, 400);
+  if (bytes.length > MAX_IMAGE_BYTES)
+    return c.json({ error: "That photo is too large. Try a smaller one." }, 413);
+  const mime = detectImage(bytes);
+  if (!mime)
+    return c.json({ error: "Only JPEG, PNG or WebP photos can be uploaded." }, 400);
+  const owned = await one("SELECT COUNT(*)::int AS n FROM images WHERE owner = $1", [user.address]);
+  if ((owned?.n ?? 0) >= 60)
+    return c.json({ error: "You have reached the photo limit. Remove unused listings first." }, 429);
+  const id = randomUUID5();
+  await exec("INSERT INTO images (id, owner, mime, data, created_at) VALUES ($1, $2, $3, $4, $5)", [id, user.address, mime, Buffer.from(bytes).toString("base64"), Date.now()]);
+  return c.json({ url: `/api/images/${id}` }, 201);
+});
+api.get("/images/:id", async (c) => {
+  const row = await one("SELECT mime, data FROM images WHERE id = $1", [c.req.param("id")]);
+  if (!row)
+    return c.json({ error: "Not found" }, 404);
+  return new Response(Buffer.from(row.data, "base64"), {
+    headers: {
+      "Content-Type": row.mime,
+      "Cache-Control": "public, max-age=31536000, immutable",
+      "Content-Security-Policy": "default-src 'none'; sandbox"
+    }
+  });
+});
+api.get("/listings/mine", requireAuth, async (c) => {
+  const user = c.get("user");
+  const rows = await q(`SELECT l.*, u.shop_name, u.display_name, u.is_demo, u.method AS seller_method, 0 AS verified_sales, 0 AS complaints
+       FROM listings l JOIN users u ON u.address = l.seller
+      WHERE l.seller = $1 AND l.status <> 'removed' ORDER BY l.created_at DESC`, [user.address]);
+  return c.json({ listings: rows.map(toListing) });
+});
+api.patch("/listings/:id", requireAuth, rateLimit("listing-edit", 30, 60000), async (c) => {
+  const user = c.get("user");
+  const body = await c.req.json().catch(() => ({}));
+  const cur = await one("SELECT * FROM listings WHERE id = $1 AND seller = $2", [c.req.param("id"), user.address]);
+  if (!cur || cur.status === "removed")
+    return c.json({ error: "Listing not found or not yours." }, 404);
+  if (cur.status === "sold" || cur.status === "reserved") {
+    return c.json({ error: "This item has a payment on it, so it can no longer be changed." }, 409);
+  }
+  if (await activeRestriction(user.address, "sell")) {
+    return c.json({ error: "Selling on your account is temporarily paused. You can appeal from the Security page." }, 403);
+  }
+  const title = "title" in body ? str(body.title, 120) : cur.title;
+  const description = "description" in body ? str(body.description, 2000) : cur.description;
+  const price = "priceUsdc" in body ? usdcAmount(body.priceUsdc) : cur.price_usdc;
+  const location = "location" in body ? str(body.location, 120) : cur.location;
+  const category = "category" in body ? typeof body.category === "string" && CATEGORIES.has(body.category) ? body.category : null : cur.category;
+  if (!title || !description || !price || !location || !category) {
+    return c.json({ error: "Title, description, price, category and location cannot be empty or invalid." }, 400);
+  }
+  let imageUrl = cur.image_url;
+  if ("imageUrl" in body) {
+    if (body.imageUrl === null || body.imageUrl === "")
+      imageUrl = null;
+    else {
+      imageUrl = listingImage(body.imageUrl);
+      if (!imageUrl)
+        return c.json({ error: "Add a photo from your device or a valid https link." }, 400);
+    }
+  }
+  const cc = "countryCode" in body ? countryCode(body.countryCode) ?? cur.country_code : cur.country_code;
+  const cfg = await getConfig();
+  const hits = prohibitedHits(`${title} ${description}`, cfg.prohibitedTerms);
+  const status = cur.status === "active" && hits.length > 0 ? "review" : cur.status;
+  await exec(`UPDATE listings SET title = $3, description = $4, price_usdc = $5, category = $6, location = $7, country_code = $8, image_url = $9, status = $10
+      WHERE id = $1 AND seller = $2 AND status IN ('active','review')`, [cur.id, user.address, title, description, price, category, location, cc, imageUrl, status]);
+  if (status === "review" && cur.status === "active") {
+    await openCase({ kind: "listing_review", severity: "medium", subject: user.address, title: `Edited listing held for review: ${title.slice(0, 80)}`, summary: `Edited text matches: ${hits.join(", ")}`, by: "system" });
+    await recordEvent({ address: user.address, kind: "listing_held", severity: "warn", details: { listingId: cur.id } });
+  }
+  const row = await one(`SELECT l.*, u.shop_name, u.display_name, u.is_demo, u.method AS seller_method, 0 AS verified_sales, 0 AS complaints
+       FROM listings l JOIN users u ON u.address = l.seller WHERE l.id = $1`, [cur.id]);
+  if (!row)
+    return c.json({ error: "Could not save the changes." }, 500);
+  return c.json({ listing: toListing(row), held: status === "review" && cur.status === "active" });
+});
 api.delete("/listings/:id", requireAuth, async (c) => {
   const user = c.get("user");
-  const res = await q("UPDATE listings SET status = 'removed' WHERE id = $1 AND seller = $2 AND status = 'active' RETURNING id", [c.req.param("id"), user.address]);
+  const res = await q("UPDATE listings SET status = 'removed' WHERE id = $1 AND seller = $2 AND status IN ('active','review') RETURNING id", [c.req.param("id"), user.address]);
   if (res.length === 0)
     return c.json({ error: "Listing not found or not yours." }, 404);
   return c.json({ ok: true });
@@ -62108,8 +62242,9 @@ app.use("*", async (c, next) => {
   c.header("Referrer-Policy", "no-referrer");
   c.header("Permissions-Policy", "camera=(self), microphone=(), geolocation=(self), payment=()");
   c.header("Strict-Transport-Security", "max-age=15552000");
-  c.header("Content-Security-Policy", "object-src 'none'; base-uri 'self'; form-action 'self'");
-  if (c.req.path.startsWith("/api/"))
+  if (!c.res.headers.has("Content-Security-Policy"))
+    c.header("Content-Security-Policy", "object-src 'none'; base-uri 'self'; form-action 'self'");
+  if (c.req.path.startsWith("/api/") && !c.res.headers.has("Cache-Control"))
     c.header("Cache-Control", "no-store");
 });
 app.onError((err, c) => {

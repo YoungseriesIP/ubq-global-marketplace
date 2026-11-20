@@ -203,3 +203,26 @@ describe('email sign-in codes', () => {
     expect(checkCode({ ...row, attempts: MAX_ATTEMPTS }, '123456', email, key, now)).toBe('locked')
   })
 })
+
+import { detectImage, isOwnImagePath } from './images'
+
+describe('photo uploads', () => {
+  const pad = (head: number[]) => Uint8Array.from([...head, ...new Array(32).fill(1)])
+  test('real image formats are recognised by their first bytes', () => {
+    expect(detectImage(pad([0xff, 0xd8, 0xff, 0xe0]))).toBe('image/jpeg')
+    expect(detectImage(pad([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe('image/png')
+    const webp = pad([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50])
+    expect(detectImage(webp)).toBe('image/webp')
+  })
+  test('anything else is refused, including scripts and tiny files', () => {
+    expect(detectImage(new TextEncoder().encode('<script>alert(1)</script>'.repeat(3)))).toBeNull()
+    expect(detectImage(new TextEncoder().encode('GIF89a'.repeat(8)))).toBeNull()
+    expect(detectImage(Uint8Array.from([0xff, 0xd8, 0xff]))).toBeNull()
+  })
+  test('only our own photo addresses are accepted as local images', () => {
+    expect(isOwnImagePath('/api/images/123e4567-e89b-12d3-a456-426614174000')).toBe(true)
+    for (const bad of ['/api/images/../secret', '/api/images/abc', 'http://x/api/images/123e4567-e89b-12d3-a456-426614174000', '//evil.example/a.png']) {
+      expect(isOwnImagePath(bad)).toBe(false)
+    }
+  })
+})

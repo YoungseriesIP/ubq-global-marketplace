@@ -18,6 +18,8 @@ export interface Listing {
   /** Demo listings have placeholder sellers and cannot be bought. */
   isDemo?: boolean
   /** Facts about the seller that the server can check. */
+  /** active = for sale, review = held for a check, reserved = payment pending, sold = paid. */
+  status?: 'active' | 'review' | 'reserved' | 'sold'
   sellerTrust?: { emailVerified: boolean; verifiedSales: number; complaints: number; trusted: boolean }
 }
 

@@ -19,7 +19,8 @@
     "build:api": "bun build server/vercel-entry.ts --target=node --format=esm --outfile=api/index.js",
     "test:unit": "bun test server/sec",
     "test:security": "bun run tests/security-live.ts",
-    "test:email": "bun run tests/email-live.ts"
+    "test:email": "bun run tests/email-live.ts",
+    "test:listings": "bun run tests/listing-live.ts"
   },
   "dependencies": {
     "@circle-fin/adapter-viem-v2": "^1.18.0",

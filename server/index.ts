@@ -11,4 +11,4 @@ app.get('*', serveStatic({ path: './dist/index.html' }))
 const port = Number(process.env.PORT ?? (process.env.NODE_ENV === 'production' ? 7860 : 3001))
 console.log(`TradePort API listening on :${port}`)
 
-export default { port, fetch: app.fetch, maxRequestBodySize: 256 * 1024 }
+export default { port, fetch: app.fetch, maxRequestBodySize: 1024 * 1024 }

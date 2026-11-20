@@ -15,7 +15,8 @@ import { payments } from './sec/payRoutes'
 import { security } from './sec/userRoutes'
 import { staff } from './sec/staffRoutes'
 import { emailAuth, emailLoginReady } from './sec/emailAuth'
-import { activeRestriction, evaluate, isFreshDevice, levelFor, openCase, recordEvent } from './sec/risk'
+import { activeRestriction, evaluate, getConfig, isFreshDevice, levelFor, openCase, prohibitedHits, recordEvent } from './sec/risk'
+import { detectImage, isOwnImagePath, MAX_IMAGE_BYTES } from './sec/images'
 import { audit } from './sec/audit'
 
 const CATEGORIES = new Set(['Electronics', 'Fashion', 'Art', 'Books', 'Collectibles', 'Home', 'Sports', 'Other'])
@@ -190,6 +191,7 @@ function toListing(r: ListingJoin) {
       trusted: r.verified_sales >= 3 && r.complaints === 0,
     },
     imageUrl: r.image_url,
+    status: r.status,
     createdAt: new Date(r.created_at).toISOString(),
   }
 }
@@ -214,8 +216,8 @@ api.post('/listings', requireAuth, rateLimit('listing', 20, 60_000), async (c) =
     return c.json({ error: 'Title, description, price, category and location are required.' }, 400)
   }
   const imageRaw = body.imageUrl
-  const imageUrl = imageRaw ? httpsUrl(imageRaw) : null
-  if (imageRaw && !imageUrl) return c.json({ error: 'Image must be a valid https link.' }, 400)
+  const imageUrl = imageRaw ? listingImage(imageRaw) : null
+  if (imageRaw && !imageUrl) return c.json({ error: 'Add a photo from your device or a valid https link.' }, 400)
   const cc = countryCode(body.countryCode) ?? user.country_code
 
   if (await activeRestriction(user.address, 'sell')) {
@@ -247,10 +249,108 @@ api.post('/listings', requireAuth, rateLimit('listing', 20, 60_000), async (c) =
   return c.json({ listing: toListing(row), held: flagged }, 201)
 })
 
+/** A listing photo is one of our own uploads or an https link. */
+function listingImage(v: unknown): string | null {
+  if (typeof v === 'string' && isOwnImagePath(v)) return v
+  return httpsUrl(v)
+}
+
+// ── Photo uploads (shrunk in the browser, checked here, kept in the database) ──
+api.post('/uploads/image', requireAuth, rateLimit('upload', 20, 600_000), async (c) => {
+  const user = c.get('user')
+  const bytes = new Uint8Array(await c.req.arrayBuffer())
+  if (bytes.length === 0) return c.json({ error: 'No photo received.' }, 400)
+  if (bytes.length > MAX_IMAGE_BYTES) return c.json({ error: 'That photo is too large. Try a smaller one.' }, 413)
+  const mime = detectImage(bytes)
+  if (!mime) return c.json({ error: 'Only JPEG, PNG or WebP photos can be uploaded.' }, 400)
+  const owned = await one<{ n: number }>('SELECT COUNT(*)::int AS n FROM images WHERE owner = $1', [user.address])
+  if ((owned?.n ?? 0) >= 60) return c.json({ error: 'You have reached the photo limit. Remove unused listings first.' }, 429)
+  const id = randomUUID()
+  await exec('INSERT INTO images (id, owner, mime, data, created_at) VALUES ($1, $2, $3, $4, $5)', [id, user.address, mime, Buffer.from(bytes).toString('base64'), Date.now()])
+  return c.json({ url: `/api/images/${id}` }, 201)
+})
+
+api.get('/images/:id', async (c) => {
+  const row = await one<{ mime: string; data: string }>('SELECT mime, data FROM images WHERE id = $1', [c.req.param('id')])
+  if (!row) return c.json({ error: 'Not found' }, 404)
+  return new Response(Buffer.from(row.data, 'base64'), {
+    headers: {
+      'Content-Type': row.mime,
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Content-Security-Policy': "default-src 'none'; sandbox",
+    },
+  })
+})
+
+// ── The seller's own listings, whatever their state ─────────────────────
+api.get('/listings/mine', requireAuth, async (c) => {
+  const user = c.get('user')
+  const rows = await q<ListingJoin>(
+    `SELECT l.*, u.shop_name, u.display_name, u.is_demo, u.method AS seller_method, 0 AS verified_sales, 0 AS complaints
+       FROM listings l JOIN users u ON u.address = l.seller
+      WHERE l.seller = $1 AND l.status <> 'removed' ORDER BY l.created_at DESC`,
+    [user.address],
+  )
+  return c.json({ listings: rows.map(toListing) })
+})
+
+// ── Edit a listing (price, text, photo) while nobody has paid for it ───────
+api.patch('/listings/:id', requireAuth, rateLimit('listing-edit', 30, 60_000), async (c) => {
+  const user = c.get('user')
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>
+  const cur = await one<ListingRow>('SELECT * FROM listings WHERE id = $1 AND seller = $2', [c.req.param('id'), user.address])
+  if (!cur || cur.status === 'removed') return c.json({ error: 'Listing not found or not yours.' }, 404)
+  if (cur.status === 'sold' || cur.status === 'reserved') {
+    return c.json({ error: 'This item has a payment on it, so it can no longer be changed.' }, 409)
+  }
+  if (await activeRestriction(user.address, 'sell')) {
+    return c.json({ error: 'Selling on your account is temporarily paused. You can appeal from the Security page.' }, 403)
+  }
+
+  const title = 'title' in body ? str(body.title, 120) : cur.title
+  const description = 'description' in body ? str(body.description, 2000) : cur.description
+  const price = 'priceUsdc' in body ? usdcAmount(body.priceUsdc) : cur.price_usdc
+  const location = 'location' in body ? str(body.location, 120) : cur.location
+  const category = 'category' in body ? (typeof body.category === 'string' && CATEGORIES.has(body.category) ? body.category : null) : cur.category
+  if (!title || !description || !price || !location || !category) {
+    return c.json({ error: 'Title, description, price, category and location cannot be empty or invalid.' }, 400)
+  }
+  let imageUrl = cur.image_url
+  if ('imageUrl' in body) {
+    if (body.imageUrl === null || body.imageUrl === '') imageUrl = null
+    else {
+      imageUrl = listingImage(body.imageUrl)
+      if (!imageUrl) return c.json({ error: 'Add a photo from your device or a valid https link.' }, 400)
+    }
+  }
+  const cc = 'countryCode' in body ? countryCode(body.countryCode) ?? cur.country_code : cur.country_code
+
+  // New wording gets the same safety check as a new listing.
+  const cfg = await getConfig()
+  const hits = prohibitedHits(`${title} ${description}`, cfg.prohibitedTerms)
+  const status = cur.status === 'active' && hits.length > 0 ? 'review' : cur.status
+  await exec(
+    `UPDATE listings SET title = $3, description = $4, price_usdc = $5, category = $6, location = $7, country_code = $8, image_url = $9, status = $10
+      WHERE id = $1 AND seller = $2 AND status IN ('active','review')`,
+    [cur.id, user.address, title, description, price, category, location, cc, imageUrl, status],
+  )
+  if (status === 'review' && cur.status === 'active') {
+    await openCase({ kind: 'listing_review', severity: 'medium', subject: user.address, title: `Edited listing held for review: ${title.slice(0, 80)}`, summary: `Edited text matches: ${hits.join(', ')}`, by: 'system' })
+    await recordEvent({ address: user.address, kind: 'listing_held', severity: 'warn', details: { listingId: cur.id } })
+  }
+  const row = await one<ListingJoin>(
+    `SELECT l.*, u.shop_name, u.display_name, u.is_demo, u.method AS seller_method, 0 AS verified_sales, 0 AS complaints
+       FROM listings l JOIN users u ON u.address = l.seller WHERE l.id = $1`,
+    [cur.id],
+  )
+  if (!row) return c.json({ error: 'Could not save the changes.' }, 500)
+  return c.json({ listing: toListing(row), held: status === 'review' && cur.status === 'active' })
+})
+
 api.delete('/listings/:id', requireAuth, async (c) => {
   const user = c.get('user')
   const res = await q<{ id: string }>(
-    "UPDATE listings SET status = 'removed' WHERE id = $1 AND seller = $2 AND status = 'active' RETURNING id",
+    "UPDATE listings SET status = 'removed' WHERE id = $1 AND seller = $2 AND status IN ('active','review') RETURNING id",
     [c.req.param('id'), user.address],
   )
   if (res.length === 0) return c.json({ error: 'Listing not found or not yours.' }, 404)
@@ -328,8 +428,8 @@ app.use('*', async (c, next) => {
   c.header('Referrer-Policy', 'no-referrer')
   c.header('Permissions-Policy', 'camera=(self), microphone=(), geolocation=(self), payment=()')
   c.header('Strict-Transport-Security', 'max-age=15552000')
-  c.header('Content-Security-Policy', "object-src 'none'; base-uri 'self'; form-action 'self'")
-  if (c.req.path.startsWith('/api/')) c.header('Cache-Control', 'no-store')
+  if (!c.res.headers.has('Content-Security-Policy')) c.header('Content-Security-Policy', "object-src 'none'; base-uri 'self'; form-action 'self'")
+  if (c.req.path.startsWith('/api/') && !c.res.headers.has('Cache-Control')) c.header('Cache-Control', 'no-store')
 })
 
 // Never echo internals or request data (it can contain tokens) to the client or the logs.
