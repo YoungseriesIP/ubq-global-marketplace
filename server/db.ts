@@ -92,7 +92,7 @@ export async function batch(stmts: Stmt[]): Promise<void> {
 let readyPromise: Promise<void> | null = null
 
 // Bump this whenever SCHEMA or SEC_SCHEMA changes. Cold starts then cost one cheap query instead of ~50.
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 
 async function init(): Promise<void> {
   const current = await rawQuery<{ value: string }>(

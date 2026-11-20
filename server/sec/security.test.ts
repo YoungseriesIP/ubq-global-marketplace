@@ -166,3 +166,40 @@ describe('staff permissions', () => {
     expect(Object.keys(PERMISSIONS).some((k) => k.startsWith('audit.write') || k.startsWith('orders.write'))).toBe(false)
   })
 })
+
+import { checkCode, circleUserId, codeHash, makeCode, normalizeEmail, MAX_ATTEMPTS } from './emailAuth'
+
+describe('email sign-in codes', () => {
+  const key = 'a'.repeat(64)
+  const email = 'person@example.com'
+
+  test('email addresses are cleaned and checked', () => {
+    expect(normalizeEmail('  Person@Example.COM ')).toBe('person@example.com')
+    for (const bad of ['', 'nope', 'a@b', 'a b@c.com', 12, null, 'x@'.repeat(40)]) expect(normalizeEmail(bad)).toBeNull()
+  })
+
+  test('codes are six digits and unpredictable enough to differ', () => {
+    const codes = new Set(Array.from({ length: 50 }, () => makeCode()))
+    expect(codes.size).toBeGreaterThan(40)
+    for (const c of codes) expect(c).toMatch(/^\d{6}$/)
+  })
+
+  test('the wallet user id is stable, private and a legal length', () => {
+    const id = circleUserId(email, key)
+    expect(id).toBe(circleUserId(email, key))
+    expect(id).not.toContain('person')
+    expect(id.length).toBeLessThanOrEqual(50)
+    expect(circleUserId('other@example.com', key)).not.toBe(id)
+    expect(circleUserId(email, 'b'.repeat(64))).not.toBe(id)
+  })
+
+  test('code checking: right, wrong, expired and locked', () => {
+    const now = 1_000_000
+    const row = { code_hash: codeHash('123456', email, key), expires_at: now + 60_000, attempts: 0 }
+    expect(checkCode(row, '123456', email, key, now)).toBe('ok')
+    expect(checkCode(row, '654321', email, key, now)).toBe('wrong')
+    expect(checkCode(row, '123456', 'other@example.com', key, now)).toBe('wrong')
+    expect(checkCode(row, '123456', email, key, now + 61_000)).toBe('expired')
+    expect(checkCode({ ...row, attempts: MAX_ATTEMPTS }, '123456', email, key, now)).toBe('locked')
+  })
+})

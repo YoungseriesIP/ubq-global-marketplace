@@ -81,3 +81,14 @@ The owner had been told these steps and had not yet reported finishing step 1.
 ## Prompt to paste into the new chat
 
 > Continue my project, UBQ Global Marketplace. First read `docs/handoff.md`, `AGENTS.md` and `README.md` in the project. I am a beginner working from my phone, so guide me one short step at a time. We were in the middle of turning on Google sign-in and fixing real email sign-in codes. Do not ask me to paste secrets in chat.
+
+
+## Update: own email-code sign-in (built after the notes above)
+
+Circle's own email-code step never delivered real codes through Gmail (test emails worked, real codes did not), so sign-in by email now runs on this server:
+
+- `POST /api/email/request` emails a 6-digit code through Gmail SMTP (nodemailer). Only a keyed hash is stored (`email_otps`), codes last 10 minutes, 5 wrong tries lock a code, and each address gets at most 5 codes an hour.
+- `POST /api/email/verify` checks the code, then creates a pseudonymous Circle PIN user (`e_` plus a hash of the email) and returns a Circle user token. The existing wallet setup then runs unchanged (the user sets a PIN once).
+- `/api/config` reports `emailLogin: "own"` when `SMTP_USER`, `SMTP_PASS` and `APP_ENCRYPTION_KEY` are set; otherwise the old Circle email-code path is used.
+- Tests: `bun run test:unit` (26) and `bun run test:email` (14, real database and Circle test environment, dev-mail mode). The real Gmail send is only proven by a live test on the deployed site.
+- Vercel settings added: `SMTP_USER`, `SMTP_PASS` (secret), `VITE_GOOGLE_CLIENT_ID` (config). Google app is published; Privacy and Terms pages live at /privacy and /terms.

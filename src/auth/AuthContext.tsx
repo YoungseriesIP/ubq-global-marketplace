@@ -10,11 +10,13 @@ import type { SocialLoginProvider } from '@circle-fin/w3s-pw-web-sdk/dist/src/ty
 import { api, ApiError, getDeviceId, getSessionToken, setSessionToken } from '@/lib/api'
 import type { AppUser, ServerConfig } from '@/lib/api'
 
-export type FlowStep = 'idle' | 'sending-code' | 'enter-code' | 'verifying' | 'creating-wallet' | 'error'
+export type FlowStep = 'idle' | 'sending-code' | 'enter-code' | 'checking-code' | 'verifying' | 'creating-wallet' | 'error'
 
 export interface SignInFlow {
   step: FlowStep
   message?: string
+  /** Shown under the code box, e.g. a wrong code. */
+  error?: string
 }
 
 interface CircleCreds { userToken: string; encryptionKey: string }
@@ -33,6 +35,8 @@ interface AuthContextValue {
   openSignIn: () => void
   closeSignIn: () => void
   sendEmailCode: (email: string) => Promise<void>
+  submitEmailCode: (email: string, code: string) => Promise<void>
+  resetFlow: () => void
   signInWithGoogle: () => Promise<void>
   signInWithWallet: () => Promise<void>
   signOut: () => Promise<void>
@@ -190,6 +194,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // ── Email one-time code ─────────────────────────────────────────────────
   const sendEmailCode = useCallback(async (email: string) => {
+    if (configRef.current?.emailLogin === 'own') {
+      try {
+        setFlow({ step: 'sending-code', message: 'Sending your code…' })
+        await api('/email/request', { body: { email }, auth: false })
+        setFlow({ step: 'enter-code', message: `We sent a 6-digit code to ${email}.` })
+      } catch (e) {
+        setFlow({ step: 'error', message: errText(e) })
+      }
+      return
+    }
     const sdk = sdkRef.current
     const appId = configRef.current?.circleAppId
     if (!sdk || !appId) { setFlow({ step: 'error', message: 'Wallet service is still loading. Try again in a moment.' }); return }
@@ -209,6 +223,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setFlow({ step: 'error', message: errText(e) })
     }
   }, [])
+
+  const submitEmailCode = useCallback(async (email: string, code: string) => {
+    try {
+      setFlow({ step: 'checking-code', message: 'Checking your code…' })
+      const r = await api<{ userToken: string; encryptionKey: string }>('/email/verify', { body: { email, code }, auth: false })
+      await finishCircleLogin({ userToken: r.userToken, encryptionKey: r.encryptionKey })
+    } catch (e) {
+      setFlow({ step: 'enter-code', message: 'Enter the 6-digit code from your email.', error: errText(e) })
+    }
+  }, [finishCircleLogin])
+
+  const resetFlow = useCallback(() => setFlow({ step: 'idle' }), [])
 
   // ── Google ──────────────────────────────────────────────────────────────
   const signInWithGoogle = useCallback(async () => {
@@ -289,13 +315,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     openSignIn: () => { setFlow({ step: 'idle' }); setSignInOpen(true) },
     closeSignIn: () => setSignInOpen(false),
     sendEmailCode,
+    submitEmailCode,
+    resetFlow,
     signInWithGoogle,
     signInWithWallet,
     signOut,
     refreshUser,
     updateProfile,
     executeChallenge,
-  }), [user, loading, config, flow, creds, signInOpen, sendEmailCode, signInWithGoogle, signInWithWallet, signOut, refreshUser, updateProfile, executeChallenge])
+  }), [user, loading, config, flow, creds, signInOpen, sendEmailCode, submitEmailCode, resetFlow, signInWithGoogle, signInWithWallet, signOut, refreshUser, updateProfile, executeChallenge])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

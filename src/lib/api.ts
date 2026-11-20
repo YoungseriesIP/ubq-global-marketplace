@@ -67,6 +67,7 @@ export interface ServerConfig {
   circleConfigured: boolean
   circleAppId: string | null
   googleClientId: string | null
+  emailLogin?: 'own' | 'circle'
   escrowAddress: string | null
   chainId: number
 }

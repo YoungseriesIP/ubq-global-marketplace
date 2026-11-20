@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { X, Mail, Loader2, ShieldCheck, Wallet, AlertCircle } from 'lucide-react'
 import { ConnectKitButton } from 'connectkit'
 import { useAccount } from 'wagmi'
@@ -18,7 +18,7 @@ function GoogleMark() {
 export function SignInModal() {
   const {
     signInOpen, closeSignIn, flow, config, user, needsReauth,
-    sendEmailCode, signInWithGoogle, signInWithWallet,
+    sendEmailCode, submitEmailCode, resetFlow, signInWithGoogle, signInWithWallet,
   } = useAuth()
   const { isConnected } = useAccount()
   const [email, setEmail] = useState(user?.email ?? '')
@@ -36,7 +36,7 @@ export function SignInModal() {
 
   if (!signInOpen) return null
 
-  const busy = flow.step === 'sending-code' || flow.step === 'verifying' || flow.step === 'creating-wallet'
+  const busy = flow.step === 'sending-code' || flow.step === 'checking-code' || flow.step === 'verifying' || flow.step === 'creating-wallet'
   const validEmail = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())
   const walletReady = !!config?.circleConfigured && !!config.circleAppId
 
@@ -84,6 +84,15 @@ export function SignInModal() {
                 </p>
               )}
             </div>
+          ) : flow.step === 'enter-code' ? (
+            <CodeEntry
+              email={email.trim()}
+              message={flow.message}
+              error={flow.error}
+              onSubmit={(code) => void submitEmailCode(email.trim(), code)}
+              onResend={() => void sendEmailCode(email.trim())}
+              onBack={resetFlow}
+            />
           ) : (
             <>
               <div>
@@ -194,6 +203,69 @@ export function SignInModal() {
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+const RESEND_SECONDS = 45
+
+function CodeEntry({ email, message, error, onSubmit, onResend, onBack }: {
+  email: string
+  message?: string
+  error?: string
+  onSubmit: (code: string) => void
+  onResend: () => void
+  onBack: () => void
+}) {
+  const [code, setCode] = useState('')
+  const [shownAt] = useState(() => Date.now())
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [])
+
+  const wait = Math.max(0, RESEND_SECONDS - Math.floor((now - shownAt) / 1000))
+  const ready = /^\d{6}$/.test(code)
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-pretty" style={{ color: 'var(--ink)' }}>{message ?? `We sent a 6-digit code to ${email}.`}</p>
+      <div>
+        <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--ink-2)' }} htmlFor="signin-code">6-digit code</label>
+        <input
+          id="signin-code"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          maxLength={6}
+          value={code}
+          onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+          placeholder="123456"
+          className="w-full px-3.5 py-3 rounded-xl text-xl tracking-[0.4em] text-center outline-none tabular-nums"
+          style={{ background: 'var(--surface)', color: 'var(--ink)', border: '1.5px solid var(--border)' }}
+        />
+      </div>
+      {error && (
+        <div className="flex items-start gap-2 text-xs p-3 rounded-xl" style={{ background: 'rgba(186,43,76,0.08)', color: 'var(--danger)' }}>
+          <AlertCircle size={14} className="mt-0.5 shrink-0" /> <span>{error}</span>
+        </div>
+      )}
+      <button
+        onClick={() => onSubmit(code)}
+        disabled={!ready}
+        className="w-full min-h-[44px] py-3 rounded-xl text-sm font-bold transition-all active:scale-[0.98] disabled:opacity-50"
+        style={{ background: 'var(--accent)', color: '#ffffff' }}
+      >
+        Confirm code
+      </button>
+      <div className="flex items-center justify-between text-xs">
+        <button onClick={onBack} className="underline" style={{ color: 'var(--muted)' }}>Use a different email</button>
+        <button onClick={onResend} disabled={wait > 0} className="underline disabled:opacity-50" style={{ color: 'var(--accent)' }}>
+          {wait > 0 ? `Send again in ${wait}s` : 'Send a new code'}
+        </button>
+      </div>
+      <p className="text-xs" style={{ color: 'var(--subtle)' }}>Check your spam folder if it does not arrive within a minute.</p>
     </div>
   )
 }

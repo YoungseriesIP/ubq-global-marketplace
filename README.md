@@ -47,6 +47,8 @@ Set these in `.env`. Never commit it.
 - `VITE_ESCROW_ADDRESS`: deployed escrow contract address to enable escrow payments (optional, public).
 - `VITE_DEFAULT_CHAIN_ID`: chain used for payments, defaults to Arc Testnet (optional).
 - `DATABASE_URL`: Postgres connection string (Neon). Required. Keep it secret and server-side only.
+- `SMTP_USER`, `SMTP_PASS`: the mail account that sends sign-in codes (for Gmail, a 16-character app password). Server-side secrets. `SMTP_HOST` (default smtp.gmail.com), `SMTP_PORT` (default 587) and `SMTP_FROM` are optional.
+- `EMAIL_DEV_MODE`: set to 1 only on a local machine to print sign-in codes in the server log instead of emailing them. It is ignored on Vercel.
 - `CONTACT_EMAIL`: public contact address shown on the Privacy Notice and Terms pages (optional).
 - `APP_ENCRYPTION_KEY`: 64 hex characters. Encrypts staff authenticator secrets. Required for the staff console. Keep it secret and server-side only.
 - `ADMIN_BOOTSTRAP_ADDRESSES`: comma-separated wallet addresses of the first admins (server-side only). They still need the authenticator code.
@@ -72,4 +74,4 @@ Circle Console setup for email and Google sign-in: configure email (SMTP) and th
 - Listings with prohibited wording, or reported by three people, are held for human review. Account restrictions from automatic checks last one day and can be appealed.
 - Data export and deletion requests; identity documents are never stored.
 
-Not included yet: identity (KYC) and business (KYB) verification, sanctions and wallet screening, real-inbox email alerts. These need provider accounts and legal review. Run the checks with `bun run test:unit` and `bun run test:security` (the second uses the real database with throwaway data).
+Not included yet: identity (KYC) and business (KYB) verification, sanctions and wallet screening, real-inbox email alerts. These need provider accounts and legal review. Run the checks with `bun run test:unit`, `bun run test:security` and `bun run test:email` (the second uses the real database with throwaway data).

@@ -17,6 +17,7 @@ const apiKey = process.env.CIRCLE_API_KEY
 const client = apiKey ? initiateUserControlledWalletsClient({ apiKey }) : null
 
 export const circleConfigured = client !== null
+export const circleClient = client
 
 interface CircleErr {
   response?: { data?: { code?: number; message?: string } }

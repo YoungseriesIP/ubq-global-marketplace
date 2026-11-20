@@ -14,6 +14,7 @@ import { requireChain } from '../src/onchain-facts'
 import { payments } from './sec/payRoutes'
 import { security } from './sec/userRoutes'
 import { staff } from './sec/staffRoutes'
+import { emailAuth, emailLoginReady } from './sec/emailAuth'
 import { activeRestriction, evaluate, isFreshDevice, levelFor, openCase, recordEvent } from './sec/risk'
 import { audit } from './sec/audit'
 
@@ -31,6 +32,7 @@ api.get('/config', (c) =>
     circleAppId: process.env.VITE_CIRCLE_APP_ID ?? null,
     googleClientId: process.env.VITE_GOOGLE_CLIENT_ID ?? null,
     contactEmail: process.env.CONTACT_EMAIL ?? null,
+    emailLogin: emailLoginReady() ? 'own' : 'circle',
     escrowAddress: process.env.VITE_ESCROW_ADDRESS ?? null,
     chainId: DEFAULT_CHAIN_ID,
   }),
@@ -310,6 +312,7 @@ api.get('/orders/mine', requireAuth, async (c) => {
 })
 
 api.route('/wallet', wallet as unknown as Hono<AuthEnv>)
+api.route('/email', emailAuth as unknown as Hono<AuthEnv>)
 api.route('/payments', payments)
 api.route('/security', security)
 api.route('/staff', staff as unknown as Hono<AuthEnv>)
